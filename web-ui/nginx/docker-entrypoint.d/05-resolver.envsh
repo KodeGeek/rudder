@@ -1,0 +1,7 @@
+# Sourced by the nginx entrypoint (*.envsh) BEFORE template substitution.
+# Detects the DNS resolver from the container's resolv.conf so proxy_pass can
+# resolve upstreams lazily on both Docker (127.0.0.11) and Kubernetes (CoreDNS).
+NGINX_RESOLVER="${NGINX_RESOLVER:-$(awk '/^nameserver/ {print $2; exit}' /etc/resolv.conf 2>/dev/null)}"
+[ -z "$NGINX_RESOLVER" ] && NGINX_RESOLVER="127.0.0.11"
+export NGINX_RESOLVER
+echo "rudder: nginx resolver = $NGINX_RESOLVER"

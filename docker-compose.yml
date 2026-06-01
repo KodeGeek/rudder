@@ -1,0 +1,143 @@
+# ── Rudder — segmented stack ────────────────────────────────────
+# Every component is its own container with its own healthcheck and restart
+# policy. The web-ui has NO hard dependency on the backends (its proxy resolves
+# upstreams lazily), so any single container failing never takes the UI down —
+# it just shows "stale / no data" until that piece recovers.
+#
+# Profiles let you pick what runs:
+#   docker compose up                                       # web-ui only (demo data)
+#   docker compose --profile bundled up                     # + vault, prometheus, pushgateway, loki
+#   docker compose --profile bundled --profile backend up   # + control-plane (Phase 2)
+#   docker compose --profile bundled --profile grafana up   # + grafana
+#
+# Copy .env.example → .env to configure endpoints / mode.
+name: rudder
+
+networks:
+  rudder:
+
+volumes:
+  prometheus-data:
+  loki-data:
+  grafana-data:
+  vault-data:
+
+services:
+  # ── The product: read-only observability UI ──────────────────────
+  web-ui:
+    build: ./web-ui
+    image: rudder-web-ui:latest
+    container_name: rudder-web-ui
+    environment:
+      DATA_SOURCE:       ${DATA_SOURCE:-mock}
+      PROMETHEUS_URL:    ${PROMETHEUS_URL:-http://prometheus:9090}
+      LOKI_URL:          ${LOKI_URL:-http://loki:3100}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://control-plane:8090}
+      VAULT_URL:         ${VAULT_URL:-http://vault:8200}
+    ports:
+      - "8080:80"        # → http://localhost:8080
+    networks: [rudder]
+    restart: unless-stopped
+    # NOTE: intentionally NO depends_on — the UI must stay up even when every
+    # backend is down. Fault isolation by design.
+    healthcheck:
+      # 127.0.0.1 not localhost: nginx is IPv4-only; localhost may resolve to ::1.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # ── Vault: SSH private keys + encrypted secrets for Ansible auth ──
+  # OpenBao (Apache-2.0 Vault fork). Swap for hashicorp/vault if you prefer.
+  # No token is committed: set VAULT_DEV_TOKEN in .env to pin a dev root token,
+  # or leave it blank and OpenBao generates one at start (printed in its logs).
+  vault:
+    image: openbao/openbao:latest
+    container_name: rudder-vault
+    command: server -dev -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN:-}
+    cap_add: [IPC_LOCK]
+    volumes:
+      - vault-data:/openbao/file
+    networks: [rudder]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 30s
+      timeout: 4s
+      retries: 5
+    profiles: ["bundled"]
+
+  # ── Control plane: reconcile loop + job runner + API (PHASE 2) ───
+  # Pulls SSH keys/secrets from Vault, renders the manifest → cron, runs
+  # Ansible, pushes metrics + logs. The ./control-plane build context does not
+  # exist yet — this service only starts under the `backend` profile and is a
+  # documented placeholder until Phase 2 lands.
+  control-plane:
+    build: ./control-plane
+    image: rudder-control-plane:latest
+    container_name: rudder-control-plane
+    environment:
+      VAULT_ADDR:         ${VAULT_URL:-http://vault:8200}
+      VAULT_TOKEN:        ${VAULT_DEV_TOKEN:-}
+      PUSHGATEWAY_URL:    http://pushgateway:9091
+      LOKI_URL:           ${LOKI_URL:-http://loki:3100}
+      RECONCILE_INTERVAL: ${RECONCILE_INTERVAL:-15m}
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["backend"]
+
+  # ── Metrics store ────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: rudder-prometheus
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [rudder]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 4s
+      retries: 4
+    profiles: ["bundled"]
+
+  # ── Pushgateway: short-lived cron jobs push metrics here ─────────
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: rudder-pushgateway
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["bundled"]
+
+  # ── Log store for run-log drill-down ─────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: rudder-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks: [rudder]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/ready"]
+      interval: 30s
+      timeout: 4s
+      retries: 6
+    profiles: ["bundled"]
+
+  # ── Optional: Grafana for power users ────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: rudder-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["grafana"]
