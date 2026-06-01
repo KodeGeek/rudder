@@ -36,6 +36,15 @@ const DEFAULT: RudderConfig = {
 };
 
 export function getConfig(): RudderConfig {
-  const w = typeof window !== "undefined" ? window.RUDDER_CONFIG : undefined;
-  return { ...DEFAULT, ...(w || {}) } as RudderConfig;
+  const w = (typeof window !== "undefined" ? window.RUDDER_CONFIG : undefined) || {};
+  // Per-source merge so each source always has url/proxy/health, even when a
+  // partial window.RUDDER_CONFIG overrides only some keys.
+  const src = (k: "prometheus" | "loki" | "controlPlane" | "vault"): SourceConfig => ({ ...DEFAULT[k], ...(w[k] || {}) });
+  return {
+    dataSource: w.dataSource ?? DEFAULT.dataSource,
+    prometheus: src("prometheus"),
+    loki: src("loki"),
+    controlPlane: src("controlPlane"),
+    vault: src("vault"),
+  };
 }

@@ -140,3 +140,11 @@ its image exists (Phase 2).
   a real unseal flow, persistent storage, and least-privilege policies.
 - The UI is fully self-contained — React, fonts, and all assets are bundled at
   build time, so the running container makes **zero external network calls**.
+
+## Production hardening
+
+The compose/k8s manifests are reference deployments for self-hosting. Before
+production use, also: **pin image tags** (the bundled/demo images use `:latest`
+for convenience — pin them and the `rudder-web-ui` image to immutable digests
+for reproducibility/SBOM), run Vault with a real unseal flow + persistent
+storage, set resource limits to taste, and terminate TLS at the ingress.
