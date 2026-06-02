@@ -1,0 +1,120 @@
+"""Vault (OpenBao) integration: SSH keypair + secret references.
+
+The SSH keypair used to authenticate Ansible runs is generated once and stored
+in Vault. The private key never leaves the control-plane (written to a 0600
+tempfile per run); the public key is published so the target can authorize it.
+Secret *values* are never returned to the API/UI — only reference metadata.
+"""
+import os
+import subprocess
+import tempfile
+import time
+
+import hvac
+
+from . import config
+
+_client = None
+
+
+def client() -> "hvac.Client":
+    global _client
+    if _client is None:
+        _client = hvac.Client(url=config.VAULT_ADDR, token=config.VAULT_TOKEN)
+    return _client
+
+
+def wait_ready(timeout: int = 90) -> bool:
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            c = client()
+            if c.sys.is_initialized() and not c.sys.is_sealed():
+                return True
+        except Exception:
+            pass
+        time.sleep(2)
+    return False
+
+
+def _kv_read(path: str):
+    try:
+        r = client().secrets.kv.v2.read_secret_version(
+            path=path, mount_point=config.VAULT_KV_MOUNT, raise_on_deleted_version=False
+        )
+        return r["data"]["data"]
+    except Exception:
+        return None
+
+
+def _kv_write(path: str, data: dict):
+    client().secrets.kv.v2.create_or_update_secret(
+        path=path, secret=data, mount_point=config.VAULT_KV_MOUNT
+    )
+
+
+def ensure_ssh_key() -> dict:
+    """Generate an ed25519 keypair in Vault if absent; return {private, public}."""
+    existing = _kv_read(config.SSH_KEY_VAULT_PATH)
+    if existing and existing.get("private") and existing.get("public"):
+        return existing
+    d = tempfile.mkdtemp()
+    kf = os.path.join(d, "id")
+    subprocess.run(
+        ["ssh-keygen", "-t", "ed25519", "-N", "", "-f", kf, "-C", "rudder-deploy-key"],
+        check=True, capture_output=True,
+    )
+    priv = open(kf).read()
+    pub = open(kf + ".pub").read().strip()
+    _kv_write(config.SSH_KEY_VAULT_PATH, {"private": priv, "public": pub})
+    try:
+        os.remove(kf); os.remove(kf + ".pub"); os.rmdir(d)
+    except OSError:
+        pass
+    return {"private": priv, "public": pub}
+
+
+def public_key() -> str:
+    data = _kv_read(config.SSH_KEY_VAULT_PATH)
+    return (data or {}).get("public", "")
+
+
+def private_key_tempfile() -> str:
+    data = _kv_read(config.SSH_KEY_VAULT_PATH)
+    if not data or not data.get("private"):
+        raise RuntimeError("SSH private key not found in Vault")
+    fd, path = tempfile.mkstemp(prefix="rudder_key_")
+    with os.fdopen(fd, "w") as f:
+        f.write(data["private"])
+    os.chmod(path, 0o600)
+    return path
+
+
+def seed_demo_secrets():
+    """Seed a few reference-only secrets so the UI's Vault panel has content.
+    Values are placeholders and are never returned to the browser."""
+    refs = {
+        "ado-pat": {"kind": "token"},
+        "github-app": {"kind": "app-creds"},
+        "registry-pull": {"kind": "token"},
+    }
+    for name, meta in refs.items():
+        if _kv_read(f"rudder/{name}") is None:
+            _kv_write(f"rudder/{name}", {"value": "(placeholder)", **meta})
+
+
+def list_secret_refs() -> list:
+    names = ["ssh-deploy-key", "ado-pat", "github-app", "registry-pull"]
+    out = []
+    for n in names:
+        data = _kv_read(f"rudder/{n}")
+        if data is None:
+            continue
+        kind = data.get("kind") or ("ssh-key" if "ssh" in n else "token")
+        out.append({
+            "ref": f"vault/{n}",
+            "used": 0,
+            "rotated": int(time.time() * 1000),
+            "kind": kind,
+        })
+    return out

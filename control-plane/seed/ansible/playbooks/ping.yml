@@ -1,0 +1,16 @@
+---
+- name: Ping fleet
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Ping the host
+      ansible.builtin.ping:
+
+    - name: Read uptime
+      ansible.builtin.command: uptime
+      register: up
+      changed_when: false
+
+    - name: Report uptime
+      ansible.builtin.debug:
+        msg: "{{ up.stdout }}"

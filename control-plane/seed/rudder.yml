@@ -1,0 +1,19 @@
+# rudder.yml — operational configuration (read-only in the UI; edit in Git).
+# The control-plane reads this on reconcile. Connection auth (SSH key) is
+# supplied from Vault at run time and is NEVER stored here.
+
+reconcile:
+  interval: 2m
+
+observability:
+  prometheus: http://prometheus:9090   # metrics
+  loki:       http://loki:3100         # run logs
+
+vault:
+  address: http://vault:8200
+  secrets:                              # references only — values stay in Vault
+    - vault/ssh-deploy-key   # ssh-key — Ansible SSH auth
+
+alerts:
+  - type: log
+    on: [failed]
