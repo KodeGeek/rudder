@@ -1,11 +1,9 @@
 /* Time + cron formatting helpers. Everything is relative to the dataset's
    virtual NOW so demo times stay stable across reloads. */
 
-import { NOW } from "../data/mock";
-
 export function relTime(ts: number | null | undefined): string {
   if (ts == null) return "never";
-  const diff = NOW - ts;
+  const diff = Date.now() - ts;
   const fut = diff < 0;
   const a = Math.abs(diff);
   const m = 60e3, h = 60 * m, d = 24 * h;

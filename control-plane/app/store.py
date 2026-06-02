@@ -16,9 +16,11 @@ from . import config
 
 _lock = threading.RLock()
 
-repos: dict = {}   # id -> ConnectedRepo
-jobs: dict = {}    # name -> job (internal, with _repoId/_workdir)
-runs: dict = {}    # name -> [run]  (newest first)
+repos: dict = {}       # id -> ConnectedRepo
+jobs: dict = {}        # name -> job (internal, with _repoId/_workdir)
+runs: dict = {}        # name -> [run]  (newest first)
+manifests: dict = {}   # id -> {"jobsYaml", "rudderYaml"}
+channels: list = []    # parsed from rudder.yml alerts across repos
 
 reconcile_state = {
     "lastAt": None, "intervalMin": 2, "inSync": True, "pendingCommit": None, "nextAt": None,
@@ -71,6 +73,8 @@ def remove_repo(rid: str):
         for n in [n for n, j in jobs.items() if j.get("_repoId") == rid]:
             jobs.pop(n, None)
             runs.pop(n, None)
+        manifests.pop(rid, None)
+        _rebuild_channels()
         save_repos()
 
 
@@ -107,6 +111,21 @@ def _render_jobs(rid: str, wd: str):
     except Exception as e:
         print(f"store: manifest parse failed for {rid}: {e}")
         manifest = []
+    # capture raw manifest + rudder.yml for the Manifest view + channels
+    jobs_yaml = ""
+    try:
+        jobs_yaml = open(mpath).read()
+    except Exception:
+        pass
+    rudder_yaml = ""
+    rpath = os.path.join(wd, "rudder.yml")
+    try:
+        if os.path.exists(rpath):
+            rudder_yaml = open(rpath).read()
+    except Exception:
+        pass
+    manifests[rid] = {"jobsYaml": jobs_yaml, "rudderYaml": rudder_yaml}
+    _rebuild_channels()
     with _lock:
         for n in [n for n, j in jobs.items() if j.get("_repoId") == rid]:
             jobs.pop(n, None)
@@ -198,3 +217,33 @@ def inventory_view() -> dict:
         "jobs": len(jobs), "lastSeen": int(time.time() * 1000),
     }
     return {"groups": groups, "hosts": [host]}
+
+
+def _rebuild_channels():
+    out = []
+    for m in manifests.values():
+        try:
+            data = yaml.safe_load(m.get("rudderYaml") or "") or {}
+        except Exception:
+            data = {}
+        for a in (data.get("alerts") or []):
+            if not isinstance(a, dict):
+                continue
+            t = a.get("type", "webhook")
+            target = a.get("target") or t
+            out.append({"type": t, "label": str(target), "target": str(target),
+                        "on": a.get("on") or [], "enabled": True})
+    global channels
+    channels = out
+
+
+def manifest_view() -> dict:
+    for rid in repos:
+        if rid in manifests:
+            r = repos[rid]
+            return {**manifests[rid], "slug": r["slug"], "branch": r["branch"], "provider": r["provider"]}
+    return {"jobsYaml": "", "rudderYaml": "", "slug": "", "branch": "", "provider": "git"}
+
+
+def channels_view() -> list:
+    return channels

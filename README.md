@@ -31,30 +31,39 @@ clean UI to see every job's status, history, and logs.
 
 | Phase | Scope | State |
 |---|---|---|
-| **1** | Web-UI (read-only observability) + containerized deployment | ✅ this repo |
-| **2** | Control-plane backend: GitHub/Azure DevOps + Vault + Ansible runner + reconcile loop + API | 🔜 planned |
+| **1** | Web-UI (read-only observability) + containerized deployment | ✅ |
+| **2** | Control-plane backend: Git providers + Vault + Ansible runner + reconcile loop + API; UI bound live | ✅ working (local e2e) |
 
-Phase 1 ships the full UI on a realistic **demo dataset** plus the deployment
-scaffolding. The control-plane that makes the live integrations work is Phase 2;
-the UI's data layer is shaped around the real contracts so it binds with no
-redesign.
+The control-plane clones a Git repo, renders `ansible/jobs.yml` into a cron
+schedule, runs **real Ansible** over SSH against hosts (auth via **Vault**), and
+pushes metrics (Prometheus) + logs (Loki). The web-UI binds to its API live.
+The full pipeline is verified end-to-end on Docker with a bundled Gitea + SSH
+target so it runs with **zero external services or secrets**. GitHub and Azure
+DevOps provider adapters are included — point at a real repo with a PAT.
 
 ## Quick start (Docker)
 
+**UI only** (no backend — onboarding + empty states):
+
 ```bash
 cp .env.example .env
-docker compose up --build        # → http://localhost:8080  (demo data)
+docker compose up --build        # → http://localhost:8080
 ```
 
-Bring up the bundled, segmented backend stack (each its own container):
+**Full stack** — control-plane + Ansible runner + Vault + bundled Gitea + SSH
+target, every component its own container:
 
 ```bash
-echo "VAULT_DEV_TOKEN=$(openssl rand -hex 16)" >> .env
-docker compose --profile bundled up --build
+cp .env.example .env
+echo "VAULT_DEV_TOKEN=$(openssl rand -hex 16)" >> .env   # shared dev token
+echo "DATA_SOURCE=live" >> .env                          # bind the UI to the API
+docker compose --profile bundled --profile backend up --build
+# → http://localhost:8080 — connect the bundled repo (URL prefilled) and watch
+#   the control-plane clone it, render the schedule, and run real Ansible jobs.
 ```
 
 See **[deploy/DEPLOY.md](deploy/DEPLOY.md)** for Kubernetes, external
-Prometheus/Loki/Vault, and the full options.
+Prometheus/Loki/Vault, pointing at a real GitHub/Azure DevOps repo, and more.
 
 ## Develop the UI
 
@@ -70,18 +79,16 @@ npm run build        # typecheck + production build → web-ui/dist
 ```
 rudder/
 ├── docker-compose.yml        segmented stack (profiles: bundled / backend / grafana)
-├── deploy/
-│   ├── DEPLOY.md             Docker + Kubernetes guide
-│   ├── prometheus.yml
-│   └── k8s/                  one Deployment+Service per component
-└── web-ui/                   Vite + React + TypeScript (static, read-only UI)
-    ├── Dockerfile            multi-stage: build → nginx
-    ├── nginx/                reverse-proxy template + runtime-config entrypoint
-    └── src/
-        ├── components/  ui · icons · composite
-        ├── screens/     Overview · Jobs · JobDetail · Manifest · Activity · Inventory · Settings
-        ├── data/        types + demo dataset
-        └── lib/         formatting + runtime config
+├── deploy/                   DEPLOY.md · prometheus.yml · k8s/ (per-component manifests)
+├── web-ui/                   Vite + React + TypeScript (read-only observability UI)
+│   ├── Dockerfile            multi-stage: build → nginx
+│   ├── nginx/                reverse-proxy template + runtime-config entrypoint
+│   └── src/  components/ · screens/ · data/types · lib/{api,data,config,format}
+├── control-plane/            Python/FastAPI: reconcile loop + Ansible runner + Vault + API
+│   ├── app/                  config · vault · gitea · store · runner · telemetry · main
+│   └── seed/                 sample fleet repo (jobs.yml + playbooks) seeded into Gitea
+├── target/                   bundled sshd host real Ansible runs land on
+└── gitea/                    bundled Git server bootstrap (init.sh)
 ```
 
 Design notes and the full spec: [`docs/superpowers/specs/`](docs/superpowers/specs/).

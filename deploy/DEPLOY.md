@@ -77,10 +77,25 @@ docker compose up --build        # → http://localhost:8080
 # UI + bundled vault / prometheus / pushgateway / loki
 docker compose --profile bundled up --build
 
-# add the control-plane (Phase 2) and/or grafana
+# FULL STACK (live): + control-plane, bundled Gitea (seeded), and an SSH target.
+# Set a shared dev Vault token and live mode first:
+echo "VAULT_DEV_TOKEN=$(openssl rand -hex 16)" >> .env
+echo "DATA_SOURCE=live" >> .env
 docker compose --profile bundled --profile backend up --build
+#   → http://localhost:8080 — connect the bundled repo (URL prefilled in the
+#     wizard); the control-plane clones it and runs real Ansible jobs.
+
+# optional grafana
 docker compose --profile bundled --profile grafana up --build
 ```
+
+### Point at a real GitHub / Azure DevOps repo
+
+The provider adapters clone over HTTPS. Connect a real repo from the UI (or
+`POST /api/control-plane/repos`) — it must contain `ansible/jobs.yml` +
+playbooks. For private repos, store the PAT/deploy key in Vault and reference it
+(auth wiring per provider is the next iteration; the bundled Gitea path needs no
+secret).
 
 Plain Docker, pointed at external infra:
 

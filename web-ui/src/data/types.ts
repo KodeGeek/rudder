@@ -55,7 +55,7 @@ export interface Job {
   cron: string;
   playbook: string;
   limit: string;
-  repo: RepoKey;
+  repo?: RepoKey;
   kind: JobKind;
   desc: string;
   state: JobState;
@@ -108,11 +108,22 @@ export interface ActivityItem {
 }
 
 export interface Reconcile {
-  lastAt: number;
+  lastAt: number | null;
   intervalMin: number;
   inSync: boolean;
   pendingCommit: null;
-  nextAt: number;
+  nextAt: number | null;
+}
+
+/** A repository the operator has connected through the UI (persisted locally).
+ *  Phase 1 stores only the reference; the Phase 2 control-plane pulls from it. */
+export interface ConnectedRepo {
+  id: string;
+  provider: Provider;
+  slug: string;
+  branch: string;
+  url: string;
+  addedAt: number;
 }
 
 export interface Channel {
@@ -136,7 +147,6 @@ export interface RudderData {
   MIN: number;
   HR: number;
   DAY: number;
-  repos: Record<RepoKey, Repo>;
   groups: Group[];
   hosts: Host[];
   jobs: Job[];

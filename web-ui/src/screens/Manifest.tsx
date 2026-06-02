@@ -1,19 +1,19 @@
-/* Rudder — Manifest viewer (READ-ONLY). The schedule + config live in Git;
-   this screen shows them. To change anything: edit in Git → PR → reconcile. */
+/* Rudder — Manifest viewer (READ-ONLY). Shows the live jobs.yml + rudder.yml
+   pulled from the connected repo. To change anything: edit in Git → PR → reconcile. */
 import React from "react";
 import { Card, Btn, StatusDot } from "../components/ui";
 import { Icons } from "../components/icons";
+import { EmptyState } from "../components/EmptyState";
 import { relTime } from "../lib/format";
-import { RUDDER } from "../data/mock";
-import type { NavFn, RudderData } from "../data/types";
+import { useData } from "../lib/data";
+import { api, type ManifestDoc } from "../lib/api";
+import type { NavFn } from "../data/types";
 
-// very light YAML tinting for read-only display
 function yamlLine(line: string) {
   const trimmed = line.trimStart();
   if (trimmed.startsWith("#")) {
     return <span style={{ color: "var(--text-faint)", fontStyle: "italic" }}>{line}</span>;
   }
-  // split inline comment
   let comment = "";
   let content = line;
   const hashIdx = line.indexOf("#");
@@ -34,7 +34,7 @@ function yamlLine(line: string) {
 }
 
 function YamlView({ text }: { text: string }) {
-  const lines = text.split("\n");
+  const lines = (text || "").split("\n");
   return (
     <div style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, lineHeight: 1.7, overflow: "auto", maxHeight: 560, padding: "10px 0" }}>
       {lines.map((l, i) => (
@@ -47,21 +47,30 @@ function YamlView({ text }: { text: string }) {
   );
 }
 
-const FILES: { k: string; name: string; desc: string; get: (D: RudderData) => string }[] = [
-  { k: "jobs", name: "ansible/jobs.yml", desc: "Job manifest — schedules, playbooks, targets", get: (D) => D.manifestYaml },
-  { k: "rudder", name: "rudder.yml", desc: "Operational config — git, reconcile, observability, vault, alerts", get: (D) => D.rudderYaml },
-];
-
-export function ManifestScreen({ onReconcile }: { nav: NavFn; onReconcile: () => void }) {
-  const D = RUDDER;
-  const [file, setFile] = React.useState("jobs");
+export function ManifestScreen({ nav }: { nav: NavFn }) {
+  const { repos, reconcile, reconcileNow } = useData();
+  const [doc, setDoc] = React.useState<ManifestDoc | null>(null);
+  const [file, setFile] = React.useState<"jobs" | "rudder">("jobs");
   const [copied, setCopied] = React.useState(false);
-  const active = FILES.find((f) => f.k === file) || FILES[0];
-  const text = active.get(D);
-  const repo = D.repos.github;
 
+  React.useEffect(() => {
+    if (repos.length === 0) return;
+    api.manifest().then(setDoc).catch(() => setDoc(null));
+  }, [repos.length]);
+
+  if (repos.length === 0) {
+    return <EmptyState icon={Icons.doc} title="No manifest yet"
+      body="Rudder reads ansible/jobs.yml and rudder.yml from a connected repository. Connect one to see it here."
+      actionLabel="Connect a repository" onAction={() => nav("connect")} />;
+  }
+
+  const files = [
+    { k: "jobs" as const, name: "ansible/jobs.yml", desc: "Job manifest — schedules, playbooks, targets", text: doc?.jobsYaml || "" },
+    { k: "rudder" as const, name: "rudder.yml", desc: "Operational config — reconcile, observability, vault, alerts", text: doc?.rudderYaml || "" },
+  ];
+  const active = files.find((f) => f.k === file) || files[0];
   const copy = () => {
-    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+    if (navigator.clipboard) navigator.clipboard.writeText(active.text).catch(() => {});
     setCopied(true); setTimeout(() => setCopied(false), 1400);
   };
 
@@ -74,13 +83,9 @@ export function ManifestScreen({ onReconcile }: { nav: NavFn; onReconcile: () =>
             The schedule and all configuration live in Git. This view is read-only — to change anything, edit the file and open a pull request. Rudder reconciles on merge.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 9 }}>
-          <Btn kind="solid" icon={Icons.refresh} onClick={onReconcile}>Reconcile now</Btn>
-          <Btn kind="primary" iconR={Icons.ext} onClick={() => {}}>Edit in Git</Btn>
-        </div>
+        <Btn kind="solid" icon={Icons.refresh} onClick={() => reconcileNow()}>Reconcile now</Btn>
       </div>
 
-      {/* sync banner */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18, padding: "12px 16px", borderRadius: "var(--r-md)",
         background: "var(--surface)", border: "1px solid var(--line)" }}>
         <StatusDot s="ok" size={9} />
@@ -89,14 +94,13 @@ export function ManifestScreen({ onReconcile }: { nav: NavFn; onReconcile: () =>
         <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>no drift between Git and the running schedule</span>
         <span style={{ flex: 1 }} />
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>
-          <Icons.refresh size={13} /> last reconcile {relTime(D.reconcile.lastAt)} · every {D.reconcile.intervalMin}m
+          <Icons.refresh size={13} /> last reconcile {relTime(reconcile?.lastAt)} · every {reconcile?.intervalMin ?? "—"}m
         </span>
       </div>
 
-      {/* file viewer */}
       <Card pad={false} style={{ marginTop: "var(--gap)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "10px 12px", borderBottom: "1px solid var(--line)" }}>
-          {FILES.map((f) => {
+          {files.map((f) => {
             const on = f.k === file;
             return (
               <button key={f.k} onClick={() => setFile(f.k)}
@@ -107,28 +111,27 @@ export function ManifestScreen({ onReconcile }: { nav: NavFn; onReconcile: () =>
             );
           })}
           <span style={{ flex: 1 }} />
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-xs)", color: "var(--text-faint)", marginRight: 4 }}>
-            <Icons.github size={13} /><span className="mono">{repo.slug}</span><span style={{ color: "var(--line)" }}>·</span><Icons.branch size={12} /><span className="mono">{repo.branch}</span>
-          </span>
+          {doc && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-xs)", color: "var(--text-faint)", marginRight: 4 }}>
+              {doc.provider === "ado" ? <Icons.azure size={13} /> : <Icons.github size={13} />}
+              <span className="mono">{doc.slug}</span><span style={{ color: "var(--line)" }}>·</span><Icons.branch size={12} /><span className="mono">{doc.branch}</span>
+            </span>
+          )}
           <button onClick={copy} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: copied ? "var(--ok)" : "var(--text-3)", background: "none", border: "none" }}>
             {copied ? <Icons.check size={13} /> : <Icons.copy size={13} />}{copied ? "copied" : "copy"}
           </button>
-          <Btn size="sm" kind="bare" iconR={Icons.ext}>Edit in Git</Btn>
         </div>
-        <div style={{ padding: "2px 0 8px", fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>
-          <div style={{ padding: "8px 16px 0" }}>{active.desc}</div>
-        </div>
-        <div style={{ background: "var(--term-bg)", borderTop: "1px solid var(--line)" }}>
-          <YamlView text={text} />
+        <div style={{ padding: "8px 16px 0", fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>{active.desc}</div>
+        <div style={{ background: "var(--term-bg)", borderTop: "1px solid var(--line)", marginTop: 8 }}>
+          <YamlView text={active.text} />
         </div>
       </Card>
 
-      {/* how-to */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--gap)", marginTop: "var(--gap)" }}>
         {[
           { n: "1", t: "Edit in Git", d: "Change ansible/jobs.yml (or rudder.yml) in your branch — locally or on GitHub / Azure DevOps." },
           { n: "2", t: "Open a PR", d: "Review the diff with your team. Git history is your audit log and rollback." },
-          { n: "3", t: "Merge → reconcile", d: `Rudder pulls on merge and regenerates the schedule within ~${D.reconcile.intervalMin}m. No UI edits, no drift.` },
+          { n: "3", t: "Merge → reconcile", d: `Rudder pulls on merge and regenerates the schedule within ~${reconcile?.intervalMin ?? 2}m. No UI edits, no drift.` },
         ].map((s) => (
           <Card key={s.n} style={{ padding: "16px 17px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>

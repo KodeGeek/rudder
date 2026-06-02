@@ -3,7 +3,6 @@ import React from "react";
 import { Icons } from "./icons";
 import { st, StatusDot } from "./ui";
 import { clockTime, relTime, dur } from "../lib/format";
-import { NOW } from "../data/mock";
 import type { Job, Run } from "../data/types";
 
 /* ============ LOG VIEWER (terminal drill-down, §5.3) ============ */
@@ -27,7 +26,7 @@ export function LogViewer({ run, job, height = 340, dense }:
     if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
     setCopied(true); setTimeout(() => setCopied(false), 1400);
   };
-  const startTs = run ? run.at - (run.duration || 0) * 1000 : NOW;
+  const startTs = run ? run.at - (run.duration || 0) * 1000 : Date.now();
 
   return (
     <div style={{ background: "var(--term-bg)", borderRadius: "var(--r-md)", border: "1px solid var(--line)", overflow: "hidden",

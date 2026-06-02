@@ -2,21 +2,20 @@
 import React from "react";
 import { Card, Btn, StatusDot, StatusPill, KindTag } from "../components/ui";
 import { Icons } from "../components/icons";
+import { EmptyState } from "../components/EmptyState";
 import { relTime, cronHuman } from "../lib/format";
-import { RUDDER } from "../data/mock";
-import type { Job, NavFn, Reconcile, Repo } from "../data/types";
+import { useData } from "../lib/data";
+import type { ConnectedRepo, Job, NavFn } from "../data/types";
 
-function Metric({ k, label, color, onClick, active }:
-  { k: React.ReactNode; label: string; color: string; onClick?: () => void; active?: boolean }) {
+function Metric({ k, label, color, onClick }:
+  { k: React.ReactNode; label: string; color: string; onClick?: () => void }) {
   return (
     <button onClick={onClick}
-      style={{ flex: 1, textAlign: "left", background: active ? "var(--surface-2)" : "var(--surface)", border: "1px solid var(--line)",
-        borderRadius: "var(--r-lg)", padding: "15px 16px", cursor: onClick ? "pointer" : "default", transition: "border-color .14s, background .14s",
+      style={{ flex: 1, textAlign: "left", background: "var(--surface)", border: "1px solid var(--line)",
+        borderRadius: "var(--r-lg)", padding: "15px 16px", cursor: onClick ? "pointer" : "default",
         position: "relative", overflow: "hidden" }}>
       <span style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: color }} />
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span className="mono" style={{ fontSize: 30, fontWeight: 600, color: "var(--text)", letterSpacing: "-.02em", lineHeight: 1 }}>{k}</span>
-      </div>
+      <span className="mono" style={{ fontSize: 30, fontWeight: 600, color: "var(--text)", letterSpacing: "-.02em", lineHeight: 1 }}>{k}</span>
       <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", marginTop: 7, fontWeight: 500 }}>{label}</div>
     </button>
   );
@@ -25,27 +24,30 @@ function Metric({ k, label, color, onClick, active }:
 function Verdict({ jobs, nav }: { jobs: Job[]; nav: NavFn }) {
   const failing = jobs.filter((j) => j.status === "fail");
   const stale = jobs.filter((j) => j.status === "stale");
-  const allGood = failing.length === 0 && stale.length === 0;
-  const c = allGood ? "var(--ok)" : "var(--fail)";
-  const dimc = allGood ? "var(--ok-dim)" : "var(--fail-dim)";
+  const noJobs = jobs.length === 0;
+  const allGood = !noJobs && failing.length === 0 && stale.length === 0;
+  const c = noJobs ? "var(--idle)" : allGood ? "var(--ok)" : "var(--fail)";
+  const dimc = noJobs ? "var(--idle-dim)" : allGood ? "var(--ok-dim)" : "var(--fail-dim)";
   return (
-    <Card style={{ padding: 0, overflow: "hidden", borderColor: allGood ? "var(--line)" : "var(--fail)" }}>
+    <Card style={{ padding: 0, overflow: "hidden", borderColor: !noJobs && !allGood ? "var(--fail)" : "var(--line)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18, padding: "20px 22px", position: "relative" }}>
         <div style={{ position: "absolute", inset: 0, background: `linear-gradient(100deg, ${dimc}, transparent 55%)`, opacity: 0.8, pointerEvents: "none" }} />
         <div style={{ position: "relative", width: 46, height: 46, borderRadius: 13, background: dimc, display: "grid", placeItems: "center", color: c, flexShrink: 0 }}>
-          {allGood ? <Icons.check size={26} sw={2.2} /> : <Icons.alert size={24} sw={2} />}
+          {allGood ? <Icons.check size={26} sw={2.2} /> : noJobs ? <Icons.clock size={24} sw={2} /> : <Icons.alert size={24} sw={2} />}
         </div>
         <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: "var(--fs-2xl)", fontWeight: 660, letterSpacing: "-.02em", color: "var(--text)", lineHeight: 1.1 }}>
-            {allGood ? "All systems nominal" : `${failing.length} job${failing.length > 1 ? "s" : ""} failing`}
+            {noJobs ? "Awaiting first reconcile" : allGood ? "All systems nominal" : `${failing.length} job${failing.length > 1 ? "s" : ""} failing`}
           </div>
           <div style={{ fontSize: "var(--fs-sm)", color: "var(--text-2)", marginTop: 5 }}>
-            {allGood
-              ? `${jobs.length} scheduled jobs · last full reconcile passed`
-              : <>Needs attention: {failing.map((f) => f.name).join(", ")}{stale.length ? ` · ${stale.length} stale` : ""}</>}
+            {noJobs
+              ? "Repository connected — the control-plane will render its jobs on the next pull."
+              : allGood
+                ? `${jobs.length} scheduled jobs · last reconcile passed`
+                : <>Needs attention: {failing.map((f) => f.name).join(", ")}{stale.length ? ` · ${stale.length} stale` : ""}</>}
           </div>
         </div>
-        {!allGood && <Btn kind="primary" iconR={Icons.chevR} onClick={() => nav("activity", { filter: "failed" })}>What broke</Btn>}
+        {!allGood && !noJobs && <Btn kind="primary" iconR={Icons.chevR} onClick={() => nav("activity", { filter: "failed" })}>What broke</Btn>}
       </div>
     </Card>
   );
@@ -66,7 +68,7 @@ function FailureRow({ j, nav }: { j: Job; nav: NavFn }) {
           <KindTag kind={j.kind} />
         </div>
         <div className="mono" style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {last?.host} · exit {last?.exit} · {j.limit}
+          {last?.host} · exit {last?.exit ?? "—"} · {j.limit}
         </div>
       </div>
       <div style={{ textAlign: "right" }}>
@@ -92,7 +94,7 @@ function NextRunRow({ j, nav }: { j: Job; nav: NavFn }) {
   );
 }
 
-function RepoCard({ repo }: { repo: Repo; reconcile?: Reconcile; nav?: NavFn }) {
+function RepoCard({ repo }: { repo: ConnectedRepo }) {
   return (
     <div style={{ padding: "13px 14px", borderRadius: "var(--r-md)", border: "1px solid var(--line-soft)", background: "var(--surface-2)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -100,13 +102,12 @@ function RepoCard({ repo }: { repo: Repo; reconcile?: Reconcile; nav?: NavFn }) 
         <span className="mono" style={{ fontSize: 12, color: "var(--text)", fontWeight: 550, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo.slug}</span>
         <span style={{ flex: 1 }} />
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--ok)" }}>
-          <StatusDot s="ok" size={6} /> synced
+          <StatusDot s="ok" size={6} /> connected
         </span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9, color: "var(--text-3)" }}>
         <Icons.branch size={13} /><span className="mono" style={{ fontSize: 11.5 }}>{repo.branch}</span>
-        <Icons.commit size={13} style={{ marginLeft: 4 }} /><span className="mono" style={{ fontSize: 11.5 }}>{repo.lastCommit.sha}</span>
-        <span style={{ fontSize: 11, color: "var(--text-faint)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repo.lastCommit.msg}</span>
+        <span style={{ fontSize: 11, color: "var(--text-faint)", marginLeft: 4 }}>added {relTime(repo.addedAt)}</span>
       </div>
     </div>
   );
@@ -122,8 +123,24 @@ function Row({ k, v, mono }: { k: React.ReactNode; v: React.ReactNode; mono?: bo
 }
 
 export function OverviewScreen({ nav }: { nav: NavFn }) {
-  const D = RUDDER;
-  const jobs = D.jobs;
+  const data = useData();
+  const { repos, jobs, reconcile, hosts, groups } = data;
+
+  if (data.loading && repos.length === 0 && jobs.length === 0) {
+    return <EmptyState icon={Icons.refresh} title="Loading…" body="Fetching state from the control-plane." />;
+  }
+  if (repos.length === 0) {
+    return (
+      <EmptyState
+        icon={Icons.git}
+        title="Connect your first repository"
+        body={<>Rudder reads your job manifest from a Git repo (GitHub or Azure DevOps) and runs it on a schedule. Connect a repo to get started.{data.info?.bundledRepoUrl ? <> The bundled demo repo is <span className="mono" style={{ color: "var(--text-2)" }}>{data.info.bundledRepoUrl}</span>.</> : null}</>}
+        actionLabel="Connect a repository"
+        onAction={() => nav("connect")}
+      />
+    );
+  }
+
   const counts = {
     ok: jobs.filter((j) => j.status === "ok").length,
     fail: jobs.filter((j) => j.status === "fail").length,
@@ -133,7 +150,7 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
   };
   const failures = jobs.filter((j) => j.status === "fail" || j.status === "stale");
   const upcoming = jobs.filter((j) => j.nextRun).sort((a, b) => (a.nextRun || 0) - (b.nextRun || 0)).slice(0, 6);
-  const hostsUp = D.hosts.filter((h) => h.up).length;
+  const hostsUp = hosts.filter((h) => h.up).length;
 
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "26px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
@@ -148,7 +165,6 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr", gap: "var(--gap)", marginTop: "var(--gap)", alignItems: "start" }}>
-        {/* LEFT */}
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--gap)" }}>
           <Card pad={false}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px 13px" }}>
@@ -170,8 +186,8 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", borderTop: "1px solid var(--line-soft)" }}>
               {[
-                { k: hostsUp + "/" + D.hosts.length, l: "hosts reachable", c: hostsUp === D.hosts.length ? "var(--ok)" : "var(--warn)" },
-                { k: D.groups.length, l: "inventory groups", c: "var(--text)" },
+                { k: hosts.length ? `${hostsUp}/${hosts.length}` : "0", l: "hosts reachable", c: hostsUp === hosts.length ? "var(--ok)" : "var(--warn)" },
+                { k: groups.length, l: "inventory groups", c: "var(--text)" },
                 { k: jobs.length, l: "scheduled jobs", c: "var(--text)" },
               ].map((x, i) => (
                 <div key={i} style={{ padding: "16px", borderRight: i < 2 ? "1px solid var(--line-soft)" : "none" }}>
@@ -183,7 +199,6 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
           </Card>
         </div>
 
-        {/* RIGHT RAIL */}
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--gap)" }}>
           <Card pad={false}>
             <div style={{ padding: "14px 16px 12px", display: "flex", alignItems: "center", gap: 9 }}>
@@ -193,9 +208,9 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
               <StatusPill s="ok" size="sm">In sync</StatusPill>
             </div>
             <div style={{ borderTop: "1px solid var(--line-soft)", padding: "13px 16px", display: "grid", gap: 9 }}>
-              <Row k="Last reconcile" v={relTime(D.reconcile.lastAt)} mono />
-              <Row k="Next reconcile" v={relTime(D.reconcile.nextAt)} mono />
-              <Row k="Interval" v={`every ${D.reconcile.intervalMin}m`} mono />
+              <Row k="Last reconcile" v={relTime(reconcile?.lastAt)} mono />
+              <Row k="Next reconcile" v={relTime(reconcile?.nextAt)} mono />
+              <Row k="Interval" v={`every ${reconcile?.intervalMin ?? "—"}m`} mono />
               <Row k="Config drift" v={<span style={{ color: "var(--ok)" }}>none</span>} />
             </div>
           </Card>
@@ -203,8 +218,7 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
           <Card pad={false}>
             <div style={{ padding: "14px 16px 12px", fontSize: "var(--fs-md)", fontWeight: 600 }}>Connected repos</div>
             <div style={{ borderTop: "1px solid var(--line-soft)", padding: "12px 14px", display: "grid", gap: 9 }}>
-              <RepoCard repo={D.repos.github} reconcile={D.reconcile} nav={nav} />
-              <RepoCard repo={D.repos.ado} reconcile={D.reconcile} nav={nav} />
+              {repos.map((r) => <RepoCard key={r.id} repo={r} />)}
               <Btn size="sm" kind="ghost" icon={Icons.settings} full onClick={() => nav("settings")}>Manage connections</Btn>
             </div>
           </Card>
@@ -215,7 +229,8 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
               <span style={{ fontSize: "var(--fs-md)", fontWeight: 600 }}>Upcoming runs</span>
             </div>
             <div style={{ borderTop: "1px solid var(--line-soft)", padding: "6px 12px 12px" }}>
-              {upcoming.map((j) => <NextRunRow key={j.name} j={j} nav={nav} />)}
+              {upcoming.length ? upcoming.map((j) => <NextRunRow key={j.name} j={j} nav={nav} />)
+                : <div style={{ padding: "14px 4px", fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>No upcoming runs.</div>}
             </div>
           </Card>
         </div>

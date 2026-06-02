@@ -1,11 +1,13 @@
 /* Rudder — Activity feed + Inventory */
 import React from "react";
 import { Card, Btn, StatusDot, KindTag } from "../components/ui";
+import { Icons } from "../components/icons";
+import { EmptyState } from "../components/EmptyState";
 import { relTime, clockTime, dur } from "../lib/format";
-import { RUDDER } from "../data/mock";
+import { DAY } from "../data/mock";
+import { useData } from "../lib/data";
 import type { ActivityItem, NavFn, RouteParams } from "../data/types";
 
-/* ========== ACTIVITY FEED (§4.5) ========== */
 const AFILT = [
   { k: "all", label: "All runs" },
   { k: "failed", label: "Failed only" },
@@ -13,17 +15,25 @@ const AFILT = [
   { k: "running", label: "Running" },
 ];
 function dayBucket(ts: number): string {
-  const diff = RUDDER.NOW - ts;
-  if (diff < RUDDER.DAY && new Date(ts).getUTCDate() === new Date(RUDDER.NOW).getUTCDate()) return "Today";
-  if (diff < 2 * RUDDER.DAY) return "Yesterday";
+  const now = Date.now();
+  const diff = now - ts;
+  if (diff < DAY && new Date(ts).getUTCDate() === new Date(now).getUTCDate()) return "Today";
+  if (diff < 2 * DAY) return "Yesterday";
   return "Earlier";
 }
 
 export function ActivityScreen({ nav, params }: { nav: NavFn; params: RouteParams }) {
-  const D = RUDDER;
+  const { activity, jobs, repos, loading } = useData();
   const [filter, setFilter] = React.useState<string>(params.filter || "all");
   const [job, setJob] = React.useState("all");
-  const items = D.activity.filter((a) => {
+
+  if (!loading && repos.length === 0) {
+    return <EmptyState icon={Icons.activity} title="No activity yet"
+      body="Run history appears here once you connect a repository and its jobs run."
+      actionLabel="Connect a repository" onAction={() => nav("connect")} />;
+  }
+
+  const items = activity.filter((a) => {
     if (filter !== "all" && a.status !== filter) return false;
     if (job !== "all" && a.job !== job) return false;
     return true;
@@ -53,7 +63,7 @@ export function ActivityScreen({ nav, params }: { nav: NavFn; params: RouteParam
         <select value={job} onChange={(e) => setJob(e.target.value)} className="focusable"
           style={{ height: 34, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface)", border: "1px solid var(--line)", color: "var(--text-2)", fontSize: "var(--fs-sm)", appearance: "none" }}>
           <option value="all">All jobs</option>
-          {D.jobs.map((j) => <option key={j.name} value={j.name}>{j.name}</option>)}
+          {jobs.map((j) => <option key={j.name} value={j.name}>{j.name}</option>)}
         </select>
       </div>
 
@@ -95,13 +105,18 @@ export function ActivityScreen({ nav, params }: { nav: NavFn; params: RouteParam
   );
 }
 
-/* ========== INVENTORY / FLEET (§4.6) ========== */
 export function InventoryScreen({ nav }: { nav: NavFn }) {
-  const D = RUDDER;
+  const { groups, hosts, jobs, repos, loading } = useData();
   const [group, setGroup] = React.useState("all");
-  const hosts = D.hosts.filter((h) => group === "all" || h.group === group);
-  const jobsForGroup = (g: string) => D.jobs.filter((j) => j.limit === g || j.limit === "all");
-  void nav;
+
+  if (!loading && repos.length === 0) {
+    return <EmptyState icon={Icons.server} title="No inventory yet"
+      body="Hosts and groups are derived from your jobs' targets once a repository is connected."
+      actionLabel="Connect a repository" onAction={() => nav("connect")} />;
+  }
+
+  const shown = hosts.filter((h) => group === "all" || h.group === group);
+  const jobsForGroup = (g: string) => jobs.filter((j) => j.limit === g || j.limit === "all");
 
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "22px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
@@ -111,7 +126,7 @@ export function InventoryScreen({ nav }: { nav: NavFn }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: "var(--gap)", marginBottom: 22 }}>
-        {D.groups.map((g) => {
+        {groups.map((g) => {
           const down = g.hosts - g.up;
           return (
             <button key={g.name} onClick={() => setGroup(group === g.name ? "all" : g.name)}
@@ -141,9 +156,9 @@ export function InventoryScreen({ nav }: { nav: NavFn }) {
           fontSize: "var(--fs-micro)", fontWeight: 650, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--text-faint)" }}>
           <span>Host</span><span>Group</span><span>OS</span><span>Jobs</span><span style={{ textAlign: "right" }}>Last seen</span>
         </div>
-        {hosts.map((h, i) => (
+        {shown.length ? shown.map((h, i) => (
           <div key={h.name} style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 0.8fr 1fr", gap: 14, padding: "12px 18px", alignItems: "center",
-            borderBottom: i < hosts.length - 1 ? "1px solid var(--line-soft)" : "none" }}>
+            borderBottom: i < shown.length - 1 ? "1px solid var(--line-soft)" : "none" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
               <StatusDot s={h.up ? "ok" : "fail"} size={8} />
               <span className="mono" style={{ fontSize: "var(--fs-sm)", color: "var(--text)", fontWeight: 550 }}>{h.name}</span>
@@ -155,7 +170,7 @@ export function InventoryScreen({ nav }: { nav: NavFn }) {
               {h.up ? relTime(h.lastSeen) : "unreachable"}
             </span>
           </div>
-        ))}
+        )) : <div style={{ padding: "32px", textAlign: "center", color: "var(--text-3)", fontSize: "var(--fs-sm)" }}>No hosts.</div>}
       </Card>
     </div>
   );

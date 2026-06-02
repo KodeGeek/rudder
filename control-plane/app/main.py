@@ -183,6 +183,16 @@ def get_inventory():
     return store.inventory_view()
 
 
+@app.get("/manifest")
+def get_manifest():
+    return store.manifest_view()
+
+
+@app.get("/channels")
+def get_channels():
+    return store.channels_view()
+
+
 @app.get("/secrets")
 def get_secrets():
     try:

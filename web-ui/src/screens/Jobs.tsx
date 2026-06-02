@@ -2,9 +2,10 @@
 import React from "react";
 import { Card, Btn, IconBtn, StatusDot, Sparkline, Ring, KindTag } from "../components/ui";
 import { Icons } from "../components/icons";
+import { EmptyState } from "../components/EmptyState";
 import { relTime, dur, cronHuman } from "../lib/format";
-import { RUDDER } from "../data/mock";
-import type { Job, NavFn, RunFn } from "../data/types";
+import { useData } from "../lib/data";
+import type { Job, NavFn } from "../data/types";
 
 const FILTERS = [
   { k: "all", label: "All" },
@@ -35,7 +36,7 @@ function Seg({ value, onChange, options, counts }:
   );
 }
 
-function JobRow({ j, nav, onRun }: { j: Job; nav: NavFn; onRun: RunFn }) {
+function JobRow({ j, nav, onRun }: { j: Job; nav: NavFn; onRun: (name: string) => void }) {
   const [h, setH] = React.useState(false);
   return (
     <div onClick={() => nav("job", { name: j.name })}
@@ -48,7 +49,6 @@ function JobRow({ j, nav, onRun }: { j: Job; nav: NavFn; onRun: RunFn }) {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</span>
           <KindTag kind={j.kind} />
-          {!j.enabled && <span style={{ fontSize: 10, color: "var(--text-faint)", border: "1px solid var(--line)", borderRadius: 4, padding: "1px 5px" }}>disabled</span>}
         </div>
         <div className="mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.playbook}</div>
       </div>
@@ -69,25 +69,29 @@ function JobRow({ j, nav, onRun }: { j: Job; nav: NavFn; onRun: RunFn }) {
         <Ring pct={j.successRate} size={30} sw={3.5} />
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }} onClick={(e) => e.stopPropagation()}>
-        {h && j.status !== "running" && <IconBtn icon={Icons.play} size={28} title="Run now" onClick={() => onRun(j)} />}
+        {h && j.status !== "running" && <IconBtn icon={Icons.play} size={28} title="Run now" onClick={() => onRun(j.name)} />}
         <IconBtn icon={Icons.chevR} size={28} title="Open" onClick={() => nav("job", { name: j.name })} />
       </div>
     </div>
   );
 }
 
-export function JobsScreen({ nav, onRun, initialFilter }: { nav: NavFn; onRun: RunFn; initialFilter?: string }) {
-  const D = RUDDER;
+export function JobsScreen({ nav, initialFilter }: { nav: NavFn; initialFilter?: string }) {
+  const { jobs, repos, runJob, loading } = useData();
   const [filter, setFilter] = React.useState(initialFilter || "all");
   const [q, setQ] = React.useState("");
   const [prov, setProv] = React.useState("all");
-  const counts = React.useMemo(() => {
-    const c: Record<string, number> = { all: D.jobs.length };
-    FILTERS.forEach((f) => { if (f.k !== "all") c[f.k] = D.jobs.filter((j) => j.status === f.k).length; });
-    return c;
-  }, [D.jobs]);
 
-  const rows = D.jobs.filter((j) => {
+  if (!loading && repos.length === 0) {
+    return <EmptyState icon={Icons.jobs} title="No jobs yet"
+      body="Jobs are rendered from a connected repository's manifest. Connect one to get started."
+      actionLabel="Connect a repository" onAction={() => nav("connect")} />;
+  }
+
+  const counts: Record<string, number> = { all: jobs.length };
+  FILTERS.forEach((f) => { if (f.k !== "all") counts[f.k] = jobs.filter((j) => j.status === f.k).length; });
+
+  const rows = jobs.filter((j) => {
     if (filter !== "all" && j.status !== filter) return false;
     if (prov !== "all" && j.provider !== prov) return false;
     if (q && !(`${j.name} ${j.playbook} ${j.limit}`.toLowerCase().includes(q.toLowerCase()))) return false;
@@ -99,12 +103,9 @@ export function JobsScreen({ nav, onRun, initialFilter }: { nav: NavFn; onRun: R
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: "var(--fs-xl)", fontWeight: 660, letterSpacing: "-.01em" }}>Jobs</h1>
-          <p style={{ margin: "4px 0 0", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>{D.jobs.length} scheduled jobs across {Object.keys(D.repos).length} repos · rendered from the manifest</p>
+          <p style={{ margin: "4px 0 0", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>{jobs.length} scheduled jobs across {repos.length} repo{repos.length === 1 ? "" : "s"} · rendered from the manifest</p>
         </div>
-        <div style={{ display: "flex", gap: 9 }}>
-          <Btn kind="solid" icon={Icons.doc} onClick={() => nav("manifest")}>View manifest</Btn>
-          <Btn kind="solid" iconR={Icons.ext} onClick={() => {}}>Edit in Git</Btn>
-        </div>
+        <Btn kind="solid" icon={Icons.doc} onClick={() => nav("manifest")}>View manifest</Btn>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 12 }}>
@@ -135,7 +136,7 @@ export function JobsScreen({ nav, onRun, initialFilter }: { nav: NavFn; onRun: R
           fontWeight: 650, letterSpacing: ".06em", textTransform: "uppercase" }}>
           <span></span><span>Job</span><span>Schedule</span><span>Target</span><span>Last run</span><span>Trend · success</span><span style={{ textAlign: "right" }}></span>
         </div>
-        {rows.length ? rows.map((j) => <JobRow key={j.name} j={j} nav={nav} onRun={onRun} />)
+        {rows.length ? rows.map((j) => <JobRow key={j.name} j={j} nav={nav} onRun={runJob} />)
           : <div style={{ padding: "48px", textAlign: "center", color: "var(--text-3)" }}>
               <Icons.search size={22} style={{ color: "var(--text-faint)", marginBottom: 10 }} />
               <div style={{ fontSize: "var(--fs-sm)" }}>No jobs match these filters.</div>
