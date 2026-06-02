@@ -22,7 +22,7 @@ labels:
 resources:
   - 00-namespace.yaml
   - 10-web-ui.yaml
+  - 20-vault.yaml            # hardened: file storage + auto-unseal sidecar (secrets persist)
   - 30-prometheus.yaml
   - 40-loki.yaml
-  # - 20-vault.yaml          # uncomment after creating the vault-dev secret (see above)
-  # - 50-control-plane.yaml  # uncomment when the control-plane image is ready (Phase 2)
+  - 50-control-plane.yaml    # reconcile loop + Ansible runner + API

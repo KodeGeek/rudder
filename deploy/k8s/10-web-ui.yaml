@@ -10,9 +10,8 @@ metadata:
   name: web-ui-config
   namespace: rudder
 data:
-  # Phase 1 default: demo data (no backend dependency). Flip to "live" once the
-  # control-plane (Phase 2) is emitting real metrics/logs to the services below.
-  DATA_SOURCE: "mock"
+  # Live: bind the UI to the in-cluster control-plane / Prometheus / Loki / Vault.
+  DATA_SOURCE: "live"
   PROMETHEUS_URL: "http://prometheus:9090"
   LOKI_URL: "http://loki:3100"
   VAULT_URL: "http://vault:8200"
@@ -58,28 +57,11 @@ metadata:
   name: web-ui
   namespace: rudder
 spec:
+  # NodePort: reach the UI at http://<node-ip>:30080 (k3s Traefik ingress is
+  # disabled in this deploy). Swap for an Ingress if you add a controller.
+  type: NodePort
   selector: { app.kubernetes.io/name: web-ui }
   ports:
     - port: 80
       targetPort: 80
----
-# Optional: expose via Ingress (requires an ingress controller).
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: web-ui
-  namespace: rudder
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: rudder.example.com          # ← your hostname
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: web-ui
-                port: { number: 80 }
+      nodePort: 30080

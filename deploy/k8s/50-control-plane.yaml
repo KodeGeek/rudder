@@ -1,8 +1,7 @@
-# ── Control plane — reconcile loop + job runner + API (PHASE 2) ──
+# ── Control plane — reconcile loop + job runner + API ──
 # Pulls SSH keys/secrets from Vault, renders the Git manifest → cron, runs
-# Ansible, and pushes metrics + logs. Placeholder until the backend lands —
-# build & push rudder-control-plane, create the vault-dev secret, then
-# uncomment 50-control-plane.yaml in kustomization.yaml.
+# Ansible, and pushes metrics + logs. Uses the hardened Vault's published root
+# token (VAULT_TOKEN_FILE on the shared PVC) — no dev-mode Secret.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,35 +12,44 @@ spec:
   replicas: 1
   selector:
     matchLabels: { app.kubernetes.io/name: control-plane }
+  strategy: { type: Recreate }     # shares the RWO vault-shared PVC with the vault pod
   template:
     metadata:
       labels: { app.kubernetes.io/name: control-plane }
     spec:
       containers:
         - name: control-plane
-          image: rudder-control-plane:latest   # ← replace with your registry path
+          image: rudder-control-plane:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8090
           env:
             - name: VAULT_ADDR
               value: "http://vault:8200"
-            - name: VAULT_TOKEN
-              valueFrom:
-                secretKeyRef: { name: vault-dev, key: root-token }   # created out-of-band
+            - name: VAULT_TOKEN_FILE          # root token published by the unseal sidecar
+              value: "/vault-shared/root-token"
+            - name: VAULT_KV_MOUNT
+              value: "secret"
             - name: PUSHGATEWAY_URL
               value: "http://pushgateway:9091"
             - name: LOKI_URL
               value: "http://loki:3100"
+            - name: GITEA_SEED                 # no bundled Gitea on k8s; skip demo seeding
+              value: "false"
             - name: RECONCILE_INTERVAL
               value: "15m"
           readinessProbe:
             httpGet: { path: /healthz, port: 8090 }
             initialDelaySeconds: 5
             periodSeconds: 15
+          volumeMounts:
+            - { name: vault-shared, mountPath: /vault-shared, readOnly: true }
           resources:
             requests: { cpu: "50m", memory: "128Mi" }
             limits:   { cpu: "1", memory: "512Mi" }
+      volumes:
+        - name: vault-shared
+          persistentVolumeClaim: { claimName: vault-shared }
 ---
 apiVersion: v1
 kind: Service
