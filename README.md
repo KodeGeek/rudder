@@ -10,6 +10,8 @@ _Steer your fleet from Git. Cron meets Argo CD meets a status page — for Ansib
 
 ---
 
+<img width="1167" height="1125" alt="image" src="https://github.com/user-attachments/assets/29478dc5-cf82-47c4-b0e4-ed7624f01540" />
+
 ## What it is
 
 Rudder runs your Ansible automation **on a schedule, driven entirely by a Git
