@@ -6,7 +6,7 @@ import { Icons, type IconFn } from "../components/icons";
 import { relTime } from "../lib/format";
 import { getConfig } from "../lib/config";
 import { useData } from "../lib/data";
-import type { NavFn } from "../data/types";
+import type { NavFn, RouteParams } from "../data/types";
 
 function SettingsRow({ children, last }: { children?: React.ReactNode; last?: boolean }) {
   return <div style={{ padding: "14px 0", borderBottom: last ? "none" : "1px solid var(--line-soft)", display: "flex", alignItems: "center", gap: 14 }}>{children}</div>;
@@ -106,6 +106,12 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
               </div>
             </div>
             <StatusPill s={r.error ? "fail" : "ok"} size="sm">{r.error ? "Error" : "connected"}</StatusPill>
+            {r.error && (
+              <Btn size="sm" kind="solid" icon={Icons.key}
+                onClick={() => nav("connect", { provider: r.provider, url: r.url, branch: r.branch, prompt: true })}>
+                Add token
+              </Btn>
+            )}
             <Btn size="sm" kind="ghost" danger icon={Icons.x} onClick={() => removeRepo(r.id)}>Remove</Btn>
           </SettingsRow>
         )) : (
@@ -195,18 +201,25 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
 }
 
 /* ========== ONBOARDING: connect a repo (real — POSTs to the control-plane) ========== */
-export function ConnectScreen({ nav }: { nav: NavFn }) {
+export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParams }) {
   const { addRepo, info } = useData();
-  const [prov, setProv] = React.useState("git");
-  const [repo, setRepo] = React.useState("");
-  const [branch, setBranch] = React.useState("main");
+  const [prov, setProv] = React.useState<string>(params?.provider || "git");
+  const [repo, setRepo] = React.useState<string>(params?.url || "");
+  const [branch, setBranch] = React.useState<string>(params?.branch || "main");
   const [token, setToken] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  // when true, this repo needs a token — highlight + focus the token field
+  const [authNeeded, setAuthNeeded] = React.useState<boolean>(!!params?.prompt);
+  const tokenRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
-    if (prov === "git" && info?.bundledRepoUrl && !repo) setRepo(info.bundledRepoUrl);
-  }, [prov, info, repo]);
+    if (prov === "git" && info?.bundledRepoUrl && !repo && !params?.url) setRepo(info.bundledRepoUrl);
+  }, [prov, info, repo, params]);
+  React.useEffect(() => { if (authNeeded) tokenRef.current?.focus(); }, [authNeeded]);
+
+  const isAuthErr = (e: string) =>
+    /could not read username|authentication failed|terminal prompts disabled|\b403\b|denied|unauthorized|invalid username or password/i.test(e);
 
   const placeholder = prov === "github" ? "https://github.com/org/repo.git"
     : prov === "ado" ? "https://dev.azure.com/org/project/_git/repo"
@@ -218,7 +231,18 @@ export function ConnectScreen({ nav }: { nav: NavFn }) {
     setBusy(true); setErr(null);
     try {
       const rec = await addRepo({ provider: prov, url, branch: branch.trim() || "main", token: token.trim() || undefined });
-      if (rec && rec.error) { setErr(rec.error); setBusy(false); return; }
+      if (rec && rec.error) {
+        setBusy(false);
+        if (isAuthErr(rec.error)) {
+          setAuthNeeded(true);
+          setErr(token.trim()
+            ? "Authentication failed — check the token has read access to this repo."
+            : "This repository is private — paste a read-only access token below and retry.");
+        } else {
+          setErr(rec.error);
+        }
+        return;
+      }
       nav("overview");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to connect repository");
@@ -256,11 +280,26 @@ export function ConnectScreen({ nav }: { nav: NavFn }) {
         <input value={branch} onChange={(e) => setBranch(e.target.value)} spellCheck={false} className="mono focusable"
           style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 16 }} />
 
+        {authNeeded && (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)",
+            background: "var(--accent-soft)", border: "1px solid var(--accent-line)", marginBottom: 14 }}>
+            <Icons.key size={15} style={{ color: "var(--accent-text)", flexShrink: 0, marginTop: 1 }} />
+            <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>
+              This repository is <strong>private</strong>. Paste a read-only access token below and retry — Rudder stores it in Vault and clones with it.
+            </span>
+          </div>
+        )}
+
         <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>
-          Access token <span style={{ color: "var(--text-faint)", fontWeight: 400 }}>· private repos only</span>
+          Access token <span style={{ color: authNeeded ? "var(--accent-text)" : "var(--text-faint)", fontWeight: 400 }}>
+            {authNeeded ? "· required for this private repo" : "· private repos only"}
+          </span>
         </label>
-        <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="ghp_… / Azure DevOps PAT" spellCheck={false} className="mono focusable"
-          style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 10 }} />
+        <input ref={tokenRef} value={token} onChange={(e) => setToken(e.target.value)} type="password"
+          placeholder="ghp_… / Azure DevOps PAT" spellCheck={false} className="mono focusable"
+          onKeyDown={(e) => { if (e.key === "Enter") connect(); }}
+          style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)",
+            border: `1px solid ${authNeeded ? "var(--accent)" : "var(--line)"}`, color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 10 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line-soft)", marginBottom: 18 }}>
           <Icons.key size={15} style={{ color: "var(--text-3)", flexShrink: 0 }} />
           <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>Stored in Vault, never shown again and never committed. Use a fine-grained, read-only token. Leave blank for public repos.</span>
@@ -272,7 +311,7 @@ export function ConnectScreen({ nav }: { nav: NavFn }) {
           <Btn kind="ghost" onClick={() => nav("settings")}>Cancel</Btn>
           <span style={{ flex: 1 }} />
           <Btn kind="primary" icon={busy ? Icons.refresh : undefined} iconR={busy ? undefined : Icons.chevR} disabled={busy} onClick={connect}>
-            {busy ? "Connecting…" : "Connect & sync"}
+            {busy ? "Connecting…" : authNeeded ? "Retry with token" : "Connect & sync"}
           </Btn>
         </div>
       </Card>

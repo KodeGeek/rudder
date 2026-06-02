@@ -59,7 +59,7 @@ export function App() {
     case "activity": screen = <ActivityScreen nav={nav} params={p} />; break;
     case "inventory": screen = <InventoryScreen nav={nav} />; break;
     case "settings": screen = <SettingsScreen nav={nav} />; break;
-    case "connect": screen = <ConnectScreen nav={nav} />; break;
+    case "connect": screen = <ConnectScreen nav={nav} params={p} />; break;
     default: screen = <OverviewScreen nav={nav} />;
   }
   const activeNav = route.name === "job" ? "jobs" : route.name === "connect" ? "settings" : route.name;
