@@ -179,6 +179,42 @@ def delete_repo_deploy_key(rid: str):
         pass
 
 
+def _hostkey_path(rid: str) -> str:
+    safe = rid.replace(":", "_").replace("/", "_")
+    return f"rudder/repo-host-key/{safe}"
+
+
+def set_repo_host_key(rid: str, private_key: str):
+    _kv_write(_hostkey_path(rid), {"private": private_key})
+
+
+def has_repo_host_key(rid: str) -> bool:
+    return bool((_kv_read(_hostkey_path(rid)) or {}).get("private"))
+
+
+def repo_host_key_tempfile(rid: str):
+    """The SSH private key the operator's fleet authorizes (for real runs)."""
+    d = _kv_read(_hostkey_path(rid))
+    priv = (d or {}).get("private")
+    if not priv:
+        return None
+    if not priv.endswith("\n"):
+        priv += "\n"  # ssh refuses keys without a trailing newline
+    fd, path = tempfile.mkstemp(prefix="rudder_hostkey_")
+    with os.fdopen(fd, "w") as f:
+        f.write(priv)
+    os.chmod(path, 0o600)
+    return path
+
+
+def delete_repo_host_key(rid: str):
+    try:
+        client().secrets.kv.v2.delete_metadata_and_all_versions(
+            path=_hostkey_path(rid), mount_point=config.VAULT_KV_MOUNT)
+    except Exception:
+        pass
+
+
 def _vaultpass_path(rid: str) -> str:
     safe = rid.replace(":", "_").replace("/", "_")
     return f"rudder/repo-vault-pass/{safe}"

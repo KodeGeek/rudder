@@ -125,6 +125,10 @@ export interface ConnectedRepo {
   url: string;
   addedAt: number;
   auth?: boolean;
+  authMethod?: string;
+  /** write-only secret "configured" flags (the values are never returned) */
+  hostKey?: boolean;
+  vaultPass?: boolean;
   /** transient: set when the last clone/fetch failed (e.g. auth) */
   error?: string;
 }

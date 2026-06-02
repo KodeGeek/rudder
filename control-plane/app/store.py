@@ -76,6 +76,13 @@ def _safe_has_vault_pass(rid: str) -> bool:
         return False
 
 
+def _safe_has_host_key(rid: str) -> bool:
+    try:
+        return vault.has_repo_host_key(rid)
+    except Exception:
+        return False
+
+
 def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method: str = "", vault_pass: str = "") -> dict:
     method = auth_method or ("token" if token else "none")
     with _lock:
@@ -86,6 +93,7 @@ def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method:
             "branch": branch or "main", "url": url, "addedAt": int(time.time() * 1000),
             "auth": method != "none", "authMethod": method,
             "vaultPass": bool(vault_pass) or _safe_has_vault_pass(rid),
+            "hostKey": _safe_has_host_key(rid),
         }
         save_repos()
     if token:
@@ -116,6 +124,7 @@ def remove_repo(rid: str):
         vault.delete_repo_token(rid)
         vault.delete_repo_deploy_key(rid)
         vault.delete_repo_vault_pass(rid)
+        vault.delete_repo_host_key(rid)
     except Exception:
         pass
 
@@ -338,32 +347,30 @@ def _discover_playbooks(wd: str) -> list:
 
 
 # ── inventory parsing (the repo's real Ansible inventory) ──
-def _parse_inventory(rid: str, wd: str):
-    path = None
+def find_inventory_file(wd: str):
+    """Locate the repo's Ansible inventory: common paths, then a shallow walk."""
     for c in _INV_CANDIDATES:
         cand = os.path.join(wd, c)
         if os.path.isfile(cand):
-            path = cand
-            break
+            return cand
         if os.path.isdir(cand):
             for f in sorted(os.listdir(cand)):
                 if f.endswith((".ini", ".yml", ".yaml")) or f in ("hosts",):
-                    path = os.path.join(cand, f)
-                    break
-            if path:
-                break
-    if not path:
-        # fallback: shallow walk (depth ≤ 3) for a hosts/inventory file
-        for root, dirs, files in os.walk(wd):
-            if ".git" in dirs:
-                dirs.remove(".git")
-            if root[len(wd):].count(os.sep) > 3:
-                dirs[:] = []
-                continue
-            match = next((f for f in sorted(files) if _INV_RE.match(f)), None)
-            if match:
-                path = os.path.join(root, match)
-                break
+                    return os.path.join(cand, f)
+    for root, dirs, files in os.walk(wd):
+        if ".git" in dirs:
+            dirs.remove(".git")
+        if root[len(wd):].count(os.sep) > 3:
+            dirs[:] = []
+            continue
+        match = next((f for f in sorted(files) if _INV_RE.match(f)), None)
+        if match:
+            return os.path.join(root, match)
+    return None
+
+
+def _parse_inventory(rid: str, wd: str):
+    path = find_inventory_file(wd)
     if not path:
         repo_inventory.pop(rid, None)
         return

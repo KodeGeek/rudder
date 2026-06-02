@@ -65,45 +65,69 @@ def run_job(name: str, manual: bool = False):
     if not j:
         return None
 
+    rid = j.get("_repoId", "")
+    wd = j["_workdir"]
+    real_inv = store.find_inventory_file(wd)            # the repo's real inventory, if any
+    target_label = (j.get("limit") or "fleet") if real_inv else config.TARGET_HOST
+
     run_id = f"{name}-{int(time.time() * 1000)}"
     store.add_run(name, {
         "id": run_id, "at": int(time.time() * 1000), "status": "running",
-        "duration": None, "exit": None, "host": config.TARGET_HOST, "streaming": True,
+        "duration": None, "exit": None, "host": target_label, "streaming": True,
         "log": [{"t": "play", "text": f"PLAY [{j['limit']}] — starting…"}],
     })
 
     started = time.time()
-    key_path = inv_path = vp_path = None
+    key_path = inv_tempfile = vp_path = None
+    cwd = None
     try:
-        key_path = vault.private_key_tempfile()
-        inv_path, grp = _inventory(j["limit"])
-        limit = j["limit"] if j["limit"] and j["limit"] != "all" else grp
-        playbook = _resolve_playbook(j)
-        cmd = ["ansible-playbook", playbook, "-i", inv_path, "--limit", limit, "--private-key", key_path]
-        # decrypt ansible-vault content using the repo's password from Vault, if any
+        # SSH key: the operator's fleet key if configured for this repo, else
+        # Rudder's bundled run key (for the demo target).
+        host_key = None
         try:
-            vp_path = vault.repo_vault_pass_tempfile(j.get("_repoId", ""))
+            host_key = vault.repo_host_key_tempfile(rid)
+        except Exception:
+            host_key = None
+        key_path = host_key or vault.private_key_tempfile()
+        # ansible-vault password (decrypts encrypted vars), if configured.
+        try:
+            vp_path = vault.repo_vault_pass_tempfile(rid)
         except Exception:
             vp_path = None
+
+        if real_inv:
+            inv_arg, cwd, playbook = real_inv, wd, j["playbook"]    # run from repo root
+        else:
+            inv_tempfile, grp = _inventory(j["limit"])
+            inv_arg, playbook = inv_tempfile, _resolve_playbook(j)
+
+        cmd = ["ansible-playbook", playbook, "-i", inv_arg, "--private-key", key_path]
+        lim = j.get("limit") or ""
+        if real_inv:
+            if lim and lim != "all":
+                cmd += ["--limit", lim]      # else: the playbook's own hosts: scopes it
+        else:
+            cmd += ["--limit", (lim if lim and lim != "all" else grp)]
         if vp_path:
             cmd += ["--vault-password-file", vp_path]
         if j.get("args"):
             cmd += str(j["args"]).split()
+
         env = dict(
             os.environ,
             ANSIBLE_HOST_KEY_CHECKING="False",
             ANSIBLE_RETRY_FILES_ENABLED="False",
-            ANSIBLE_SSH_ARGS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10",
+            ANSIBLE_SSH_ARGS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15",
         )
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env, cwd=cwd)
         out = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
         exit_code = proc.returncode
     except subprocess.TimeoutExpired:
-        out, exit_code = "control-plane: playbook timed out after 300s", 124
+        out, exit_code = "control-plane: playbook timed out (30m)", 124
     except Exception as e:
         out, exit_code = f"control-plane error: {e}", 1
     finally:
-        for p in (key_path, inv_path, vp_path):
+        for p in (key_path, inv_tempfile, vp_path):
             if p and os.path.exists(p):
                 try:
                     os.remove(p)
@@ -116,7 +140,7 @@ def run_job(name: str, manual: bool = False):
         or [{"t": "task", "text": "(no output)"}]
     store.replace_run(name, run_id, {
         "id": run_id, "at": int(time.time() * 1000), "status": status,
-        "duration": duration, "exit": exit_code, "host": config.TARGET_HOST, "log": log,
+        "duration": duration, "exit": exit_code, "host": target_label, "log": log,
     })
     telemetry.push_metrics(name, status == "success", exit_code, duration)
     telemetry.push_logs(name, status, out)

@@ -2,6 +2,7 @@
    + the Connect-a-repository flow (POSTs to the control-plane). */
 import React from "react";
 import { Card, Btn, StatusPill } from "../components/ui";
+import { EmptyState } from "../components/EmptyState";
 import { Icons, type IconFn } from "../components/icons";
 import { relTime } from "../lib/format";
 import { getConfig } from "../lib/config";
@@ -108,11 +109,12 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
             </div>
             <StatusPill s={r.error ? "fail" : "ok"} size="sm">{r.error ? "Error" : "connected"}</StatusPill>
             {r.error && (
-              <Btn size="sm" kind="solid" icon={Icons.key}
+              <Btn size="sm" kind="solid" icon={Icons.git}
                 onClick={() => nav("connect", { provider: r.provider, url: r.url, branch: r.branch, prompt: true })}>
-                Add credentials
+                Fix auth
               </Btn>
             )}
+            <Btn size="sm" kind="ghost" icon={Icons.key} onClick={() => nav("credentials", { rid: r.id })}>Credentials</Btn>
             <Btn size="sm" kind="ghost" danger icon={Icons.x} onClick={() => removeRepo(r.id)}>Remove</Btn>
           </SettingsRow>
         )) : (
@@ -400,6 +402,99 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
           <Btn kind="primary" icon={busy ? Icons.refresh : undefined} iconR={busy ? undefined : Icons.chevR}
             disabled={busy || (method === "deploykey" && !pubKey)} onClick={connect}>
             {connectLabel}
+          </Btn>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ========== Per-repo run/decrypt credentials (write-only) ========== */
+export function CredentialsScreen({ nav, params }: { nav: NavFn; params?: RouteParams }) {
+  const { repos, flash, refresh } = useData();
+  const rid = params?.rid || "";
+  const repo = repos.find((r) => r.id === rid);
+  const [hostKey, setHostKey] = React.useState("");
+  const [vaultPass, setVaultPass] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  if (!repo) {
+    return <EmptyState icon={Icons.git} title="Repository not found"
+      body="It may have been removed." actionLabel="Back to settings" onAction={() => nav("settings")} />;
+  }
+
+  const save = async () => {
+    if (!hostKey.trim() && !vaultPass.trim()) {
+      setErr("Nothing to update — paste a key or password to set or replace it.");
+      return;
+    }
+    setBusy(true); setErr(null);
+    try {
+      await api.setCredentials({
+        rid, hostKey: hostKey.trim() || undefined, vaultPass: vaultPass.trim() || undefined,
+      });
+      flash("Credentials saved to Vault", "ok");
+      await refresh();
+      nav("settings");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to save credentials");
+      setBusy(false);
+    }
+  };
+
+  const Status = ({ on }: { on?: boolean }) => (
+    <StatusPill s={on ? "ok" : "never"} size="sm">{on ? "Configured" : "Not set"}</StatusPill>
+  );
+
+  return (
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
+      <button onClick={() => nav("settings")} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "var(--text-3)", fontSize: "var(--fs-sm)", padding: 0, marginBottom: 20 }}>
+        <Icons.chevL size={15} /> Settings
+      </button>
+
+      <Card>
+        <h2 style={{ margin: "0 0 4px", fontSize: "var(--fs-xl)", fontWeight: 640 }}>Run credentials</h2>
+        <p style={{ margin: "0 0 4px", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>
+          <span className="mono" style={{ color: "var(--text-2)" }}>{repo.slug}</span>
+        </p>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)",
+          background: "var(--surface-2)", border: "1px solid var(--line-soft)", margin: "12px 0 20px" }}>
+          <Icons.key size={15} style={{ color: "var(--text-3)", flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+            Write-only. These are stored in Vault and used only by the control-plane at run time — <strong>never shown again or returned to the UI</strong>. Paste a value to set it, or to <strong>replace</strong> the existing one. Leave blank to keep the current value.
+          </span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+          <label style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>Fleet SSH private key</label>
+          <Status on={repo.hostKey} />
+        </div>
+        <textarea value={hostKey} onChange={(e) => setHostKey(e.target.value)} spellCheck={false} className="mono focusable"
+          placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n…  (paste to " + (repo.hostKey ? "replace" : "set") + ")"}
+          style={{ width: "100%", height: 96, padding: "8px 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: 11.5, lineHeight: 1.5, resize: "vertical", marginBottom: 8 }} />
+        <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginBottom: 20 }}>
+          The SSH key your hosts authorize (your ansible key). Runs use it against your repo's inventory.
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 7 }}>
+          <label style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>Ansible Vault password</label>
+          <Status on={repo.vaultPass} />
+        </div>
+        <input value={vaultPass} onChange={(e) => setVaultPass(e.target.value)} type="password" spellCheck={false} className="mono focusable"
+          placeholder={"paste to " + (repo.vaultPass ? "replace" : "set")}
+          style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 8 }} />
+        <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginBottom: 20 }}>
+          Decrypts <span className="mono">ansible-vault</span> content at run time via <span className="mono">--vault-password-file</span>.
+        </div>
+
+        {err && <div style={{ fontSize: "var(--fs-xs)", color: "var(--fail)", marginBottom: 12 }}>{err}</div>}
+
+        <div style={{ display: "flex", gap: 9 }}>
+          <Btn kind="ghost" onClick={() => nav("settings")}>Cancel</Btn>
+          <span style={{ flex: 1 }} />
+          <Btn kind="primary" icon={busy ? Icons.refresh : Icons.key} disabled={busy} onClick={save}>
+            {busy ? "Saving…" : "Save to Vault"}
           </Btn>
         </div>
       </Card>

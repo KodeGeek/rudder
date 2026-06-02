@@ -37,6 +37,8 @@ export const api = {
   repos: () => get<ConnectedRepo[]>("/repos"),
   addRepo: (body: NewRepo) => send<ConnectedRepo>("POST", "/repos", body),
   deployKey: (body: { provider: string; url: string }) => send<DeployKey>("POST", "/deploy-key", body),
+  setCredentials: (body: { rid: string; hostKey?: string; vaultPass?: string; token?: string }) =>
+    send<ConnectedRepo>("POST", "/repos/credentials", body),
   removeRepo: (id: string) => send<void>("DELETE", "/repos/" + id),
   jobs: () => get<Job[]>("/jobs"),
   job: (name: string) => get<Job>("/jobs/" + encodeURIComponent(name)),

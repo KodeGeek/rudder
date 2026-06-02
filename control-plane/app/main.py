@@ -115,7 +115,12 @@ def info():
 
 @app.get("/repos")
 def get_repos():
-    return list(store.repos.values())
+    # flags reflect live Vault state (so replacing/clearing a secret is accurate);
+    # the secret values themselves are never returned.
+    return [
+        {**r, "hostKey": store._safe_has_host_key(r["id"]), "vaultPass": store._safe_has_vault_pass(r["id"])}
+        for r in store.repos.values()
+    ]
 
 
 class RepoIn(BaseModel):
@@ -137,6 +142,38 @@ def add_repo(body: RepoIn):
         print("main: reconcile of new repo failed:", e)
     # surface a clone/auth error so the UI can show why a repo isn't syncing
     return store.repos.get(rec["id"], rec)
+
+
+class CredsIn(BaseModel):
+    rid: str
+    hostKey: str = ""      # SSH private key the operator's fleet authorizes (for runs)
+    vaultPass: str = ""    # ansible-vault password
+    token: str = ""        # git token (re-auth)
+
+
+@app.post("/repos/credentials")
+def set_credentials(body: CredsIn):
+    """Write-only: store run/decrypt secrets in Vault. NEVER returns secret
+    values — only boolean 'configured' flags. Submitting a value overwrites it."""
+    r = store.repos.get(body.rid)
+    if not r:
+        raise HTTPException(status_code=404, detail="repo not found")
+    if body.hostKey:
+        vault.set_repo_host_key(body.rid, body.hostKey)
+        r["hostKey"] = True
+    if body.vaultPass:
+        vault.set_repo_vault_pass(body.rid, body.vaultPass)
+        r["vaultPass"] = True
+    if body.token:
+        vault.set_repo_token(body.rid, body.token)
+        r["auth"] = True
+        try:
+            store.reconcile_repo(body.rid)
+            schedule_all()
+        except Exception as e:
+            print("main: reconcile after token update failed:", e)
+    store.save_repos()
+    return r
 
 
 class DeployKeyIn(BaseModel):

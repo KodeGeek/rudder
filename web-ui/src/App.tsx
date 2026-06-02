@@ -11,7 +11,7 @@ import { JobsScreen } from "./screens/Jobs";
 import { JobDetailScreen } from "./screens/JobDetail";
 import { ManifestScreen } from "./screens/Manifest";
 import { ActivityScreen, InventoryScreen } from "./screens/Activity";
-import { SettingsScreen, ConnectScreen } from "./screens/Settings";
+import { SettingsScreen, ConnectScreen, CredentialsScreen } from "./screens/Settings";
 
 type Theme = "dark" | "light";
 type NavItem = { k: string; label: string; icon: IconFn };
@@ -90,9 +90,11 @@ export function App() {
     case "inventory": screen = <InventoryScreen nav={nav} />; break;
     case "settings": screen = <SettingsScreen nav={nav} />; break;
     case "connect": screen = <ConnectScreen nav={nav} params={p} />; break;
+    case "credentials": screen = <CredentialsScreen nav={nav} params={p} />; break;
     default: screen = <OverviewScreen nav={nav} />;
   }
-  const activeNav = route.name === "job" ? "jobs" : route.name === "connect" ? "settings" : route.name;
+  const activeNav = route.name === "job" ? "jobs"
+    : (route.name === "connect" || route.name === "credentials") ? "settings" : route.name;
 
   const reconcileLabel = data.repos.length === 0
     ? "No repositories connected"
