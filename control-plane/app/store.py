@@ -219,19 +219,71 @@ def reconcile_repo(rid: str):
     _parse_inventory(rid, wd)
 
 
+_MANIFEST_CANDIDATES = [
+    "ansible/jobs.yml", "ansible/jobs.yaml", "jobs.yml", "jobs.yaml",
+    "playbooks/ansible/jobs.yml", "playbooks/jobs.yml", "rudder/jobs.yml",
+]
+
+
+def _manifest_entries(data):
+    """The job list — either a bare top-level list, or under a `scheduled_jobs`
+    / `jobs` key (so both Rudder's and common existing schemas work)."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        v = data.get("scheduled_jobs") or data.get("jobs")
+        return v if isinstance(v, list) else []
+    return []
+
+
+def _looks_like_manifest(data) -> bool:
+    entries = _manifest_entries(data)
+    return bool(entries) and any(
+        isinstance(e, dict) and "name" in e and ("playbook" in e or "cron" in e) for e in entries)
+
+
+def _find_manifest(wd: str):
+    """Locate the Rudder job manifest anywhere in the repo. Tries common paths,
+    then walks for a jobs.y(a)ml that actually looks like a Rudder manifest."""
+    for c in _MANIFEST_CANDIDATES:
+        p = os.path.join(wd, c)
+        if os.path.isfile(p):
+            return p
+    cands = []
+    for root, dirs, files in os.walk(wd):
+        if ".git" in dirs:
+            dirs.remove(".git")
+        if root[len(wd):].count(os.sep) > 5:
+            dirs[:] = []
+            continue
+        for f in files:
+            if f in ("jobs.yml", "jobs.yaml"):
+                cands.append(os.path.join(root, f))
+    for p in sorted(cands):
+        try:
+            if _looks_like_manifest(yaml.safe_load(open(p))):
+                return p
+        except Exception:
+            pass
+    return None
+
+
 def _render_jobs(rid: str, wd: str):
     r = repos[rid]
-    mpath = os.path.join(wd, "ansible", "jobs.yml")
-    if not os.path.exists(mpath):
-        mpath = os.path.join(wd, "jobs.yml")
-    found = os.path.exists(mpath)
-    try:
-        manifest = yaml.safe_load(open(mpath)) or [] if found else []
-    except Exception as e:
-        print(f"store: manifest parse failed for {rid}: {e}")
-        manifest = []
+    mpath = _find_manifest(wd)
+    found = mpath is not None
+    manifest = []
     jobs_yaml = ""
+    manifest_dir = ""
     if found:
+        manifest_dir = os.path.relpath(os.path.dirname(mpath), wd)
+        if manifest_dir == ".":
+            manifest_dir = ""
+        try:
+            manifest = yaml.safe_load(open(mpath)) or []
+        except Exception as e:
+            print(f"store: manifest parse failed for {rid}: {e}")
+            manifest = []
         try:
             jobs_yaml = open(mpath).read()
         except Exception:
@@ -251,7 +303,7 @@ def _render_jobs(rid: str, wd: str):
     with _lock:
         for n in [n for n, j in jobs.items() if j.get("_repoId") == rid]:
             jobs.pop(n, None)
-        for entry in manifest:
+        for entry in _manifest_entries(manifest):
             if not isinstance(entry, dict) or "name" not in entry:
                 continue
             name = entry["name"]
@@ -261,7 +313,7 @@ def _render_jobs(rid: str, wd: str):
                 "kind": entry.get("kind", "task"), "args": entry.get("extra_args"),
                 "desc": entry.get("desc", ""),
                 "provider": r["provider"], "repoSlug": r["slug"], "branch": r["branch"],
-                "_repoId": rid, "_workdir": wd,
+                "_repoId": rid, "_workdir": wd, "_manifestDir": manifest_dir,
             }
 
 

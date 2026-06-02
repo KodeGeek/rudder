@@ -45,6 +45,21 @@ def _inventory(limit: str):
     return path, grp
 
 
+def _resolve_playbook(j: dict) -> str:
+    """Resolve the playbook path relative to the repo root, falling back to the
+    manifest's directory (manifests aren't always at the repo root)."""
+    wd, pb = j["_workdir"], j.get("playbook", "")
+    cand = os.path.join(wd, pb)
+    if os.path.exists(cand):
+        return cand
+    md = j.get("_manifestDir", "")
+    if md:
+        alt = os.path.join(wd, md, pb)
+        if os.path.exists(alt):
+            return alt
+    return cand
+
+
 def run_job(name: str, manual: bool = False):
     j = store.jobs.get(name)
     if not j:
@@ -63,7 +78,7 @@ def run_job(name: str, manual: bool = False):
         key_path = vault.private_key_tempfile()
         inv_path, grp = _inventory(j["limit"])
         limit = j["limit"] if j["limit"] and j["limit"] != "all" else grp
-        playbook = os.path.join(j["_workdir"], j["playbook"])
+        playbook = _resolve_playbook(j)
         cmd = ["ansible-playbook", playbook, "-i", inv_path, "--limit", limit, "--private-key", key_path]
         # decrypt ansible-vault content using the repo's password from Vault, if any
         try:
