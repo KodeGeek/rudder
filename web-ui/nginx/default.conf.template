@@ -51,12 +51,15 @@ server {
         proxy_connect_timeout 4s;
         proxy_pass $up_cp/$1$is_args$args;
     }
-    location ~ ^/api/vault/(.*)$ {
+    # Vault is proxied for a liveness pill ONLY — restricted to the unauthenticated
+    # health endpoint. The rest of the Vault HTTP API must never be reachable from
+    # the browser (secrets live behind it; the control-plane is its only client).
+    location = /api/vault/v1/sys/health {
         set $up_vault "${VAULT_URL}";
         if ($up_vault = "") { return 503; }
         proxy_ssl_server_name on;
         proxy_connect_timeout 4s;
-        proxy_pass $up_vault/$1$is_args$args;
+        proxy_pass $up_vault/v1/sys/health$is_args$args;
     }
 
     # ── static app ──

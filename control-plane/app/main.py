@@ -71,14 +71,20 @@ def reconcile_all():
 
 def _boot():
     store.reconcile_state["intervalMin"] = max(1, _interval_seconds(config.RECONCILE_INTERVAL) // 60)
-    try:
-        if vault.wait_ready():
-            vault.ensure_ssh_key()
-            vault.seed_demo_secrets()
-        else:
-            print("main: vault not ready; continuing")
-    except Exception as e:
-        print("main: vault init failed:", e)
+    if vault.wait_ready():
+        # The KV engine may not be mounted the instant Vault unseals (the bundled
+        # unseal sidecar enables secret/ just after init), so retry until writes land.
+        for attempt in range(30):
+            try:
+                vault.ensure_ssh_key()
+                if config.GITEA_SEED:  # placeholder refs are demo content — not for real deploys
+                    vault.seed_demo_secrets()
+                break
+            except Exception as e:
+                print(f"main: vault init attempt {attempt + 1} failed: {e}")
+                time.sleep(3)
+    else:
+        print("main: vault not ready; continuing")
     try:
         if config.GITEA_SEED and gitea.wait_ready():
             gitea.seed()

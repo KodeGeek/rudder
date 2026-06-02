@@ -9,6 +9,9 @@ def env(key: str, default: str = "") -> str:
 # ── Vault (OpenBao) ──
 VAULT_ADDR = env("VAULT_ADDR", "http://vault:8200")
 VAULT_TOKEN = env("VAULT_TOKEN", "")
+# Auto-unseal mode generates the root token at init; the unseal sidecar writes it
+# here. Used only when VAULT_TOKEN env is unset.
+VAULT_TOKEN_FILE = env("VAULT_TOKEN_FILE", "")
 VAULT_KV_MOUNT = env("VAULT_KV_MOUNT", "secret")
 SSH_KEY_VAULT_PATH = env("SSH_KEY_VAULT_PATH", "rudder/ssh-deploy-key")
 

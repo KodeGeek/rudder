@@ -226,6 +226,27 @@ def reconcile_repo(rid: str):
     r.pop("error", None)
     _render_jobs(rid, wd)
     _parse_inventory(rid, wd)
+    _install_galaxy_requirements(wd)
+
+
+_REQ_CANDIDATES = [
+    "requirements.yml", "requirements.yaml", "collections/requirements.yml",
+    "roles/requirements.yml", "ansible/requirements.yml", "playbooks/requirements.yml",
+]
+
+
+def _install_galaxy_requirements(wd: str):
+    """Install repo-declared Ansible collections/roles (if a requirements file
+    exists). The base image already bundles common collections."""
+    for c in _REQ_CANDIDATES:
+        req = os.path.join(wd, c)
+        if not os.path.isfile(req):
+            continue
+        try:
+            subprocess.run(["ansible-galaxy", "install", "-r", req], cwd=wd,
+                           capture_output=True, text=True, timeout=600)
+        except Exception as e:
+            print(f"store: ansible-galaxy install failed for {req}: {e}")
 
 
 _MANIFEST_CANDIDATES = [

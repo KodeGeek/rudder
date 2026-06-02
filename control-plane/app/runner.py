@@ -104,12 +104,15 @@ def run_job(name: str, manual: bool = False):
         cmd = ["ansible-playbook", playbook, "-i", inv_arg, "--private-key", key_path]
         lim = j.get("limit") or ""
         if real_inv:
+            # Inventories/group_vars commonly hard-code ansible_ssh_private_key_file to an
+            # operator-local path (e.g. ~/.../Certs/key). --private-key is low precedence and
+            # loses to that. Force Rudder's Vault-provided key via extra-vars (highest
+            # precedence) so the run key actually reaches the fleet.
+            cmd += ["-e", f"ansible_ssh_private_key_file={key_path}"]
             if lim and lim != "all":
                 cmd += ["--limit", lim]      # else: the playbook's own hosts: scopes it
         else:
             cmd += ["--limit", (lim if lim and lim != "all" else grp)]
-        if vp_path:
-            cmd += ["--vault-password-file", vp_path]
         if j.get("args"):
             cmd += str(j["args"]).split()
 
@@ -119,6 +122,9 @@ def run_job(name: str, manual: bool = False):
             ANSIBLE_RETRY_FILES_ENABLED="False",
             ANSIBLE_SSH_ARGS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15",
         )
+        if vp_path:
+            # override ansible.cfg's vault_password_file (often an operator's local path)
+            env["ANSIBLE_VAULT_PASSWORD_FILE"] = vp_path
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env, cwd=cwd)
         out = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
         exit_code = proc.returncode

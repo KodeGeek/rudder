@@ -5,7 +5,16 @@ set -e
 
 VAULT_ADDR="${VAULT_ADDR:-http://vault:8200}"
 VAULT_TOKEN="${VAULT_TOKEN:-}"
+VAULT_TOKEN_FILE="${VAULT_TOKEN_FILE:-}"
 KV_MOUNT="${VAULT_KV_MOUNT:-secret}"
+
+# auto-unseal mode: the root token is generated at init and published to a file
+# by the vault-unseal sidecar — wait for it if no token was passed via env.
+i=0
+while [ -z "$VAULT_TOKEN" ] && [ -n "$VAULT_TOKEN_FILE" ] && [ "$i" -lt 60 ]; do
+  [ -s "$VAULT_TOKEN_FILE" ] && VAULT_TOKEN=$(cat "$VAULT_TOKEN_FILE")
+  [ -z "$VAULT_TOKEN" ] && { echo "target: waiting for vault token…"; sleep 3; i=$((i + 1)); }
+done
 KEY_PATH="${SSH_KEY_VAULT_PATH:-rudder/ssh-deploy-key}"
 USER_NAME="${TARGET_USER:-rudder}"
 HOME_DIR="/home/${USER_NAME}"

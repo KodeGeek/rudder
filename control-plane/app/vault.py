@@ -15,12 +15,31 @@ import hvac
 from . import config
 
 _client = None
+_client_token = None
+
+
+def _read_token() -> str:
+    """Vault token from env, or from the file the unseal sidecar publishes
+    (auto-unseal mode generates the root token at init time)."""
+    if config.VAULT_TOKEN:
+        return config.VAULT_TOKEN
+    f = config.VAULT_TOKEN_FILE
+    if f and os.path.exists(f):
+        try:
+            return open(f).read().strip()
+        except OSError:
+            return ""
+    return ""
 
 
 def client() -> "hvac.Client":
-    global _client
-    if _client is None:
-        _client = hvac.Client(url=config.VAULT_ADDR, token=config.VAULT_TOKEN)
+    # Rebuild if the token first appears or changes — the token file may not
+    # exist yet when the control-plane boots, then the sidecar publishes it.
+    global _client, _client_token
+    tok = _read_token()
+    if _client is None or tok != _client_token:
+        _client = hvac.Client(url=config.VAULT_ADDR, token=tok)
+        _client_token = tok
     return _client
 
 

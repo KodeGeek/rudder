@@ -21,6 +21,7 @@ volumes:
   loki-data:
   grafana-data:
   vault-data:
+  vault-shared:     # unseal key + root token, written by vault-unseal (never in git)
   gitea-data:
   gitea-shared:
   cp-work:
@@ -52,24 +53,45 @@ services:
 
   # ── Vault: SSH private keys + encrypted secrets for Ansible auth ──
   # OpenBao (Apache-2.0 Vault fork). Swap for hashicorp/vault if you prefer.
-  # No token is committed: set VAULT_DEV_TOKEN in .env to pin a dev root token,
-  # or leave it blank and OpenBao generates one at start (printed in its logs).
+  # PRODUCTION file storage: secrets are encrypted at rest and persist across
+  # restarts. The vault-unseal sidecar initializes it once and auto-unseals it.
+  # No token is committed — the root token is generated at init and kept on a
+  # private volume. For production, run a real sealed Vault instead (SECURITY.md).
   vault:
     image: openbao/openbao:latest
     container_name: rudder-vault
-    command: server -dev -dev-listen-address=0.0.0.0:8200
-    environment:
-      BAO_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_TOKEN:-}
-    cap_add: [IPC_LOCK]
+    command: server -config=/openbao/config/config.hcl
     volumes:
       - vault-data:/openbao/file
+      - ./vault/config.hcl:/openbao/config/config.hcl:ro
     networks: [rudder]
     restart: unless-stopped
     healthcheck:
+      # exit 0 = unsealed/ready; exit 2 = sealed (briefly, until the sidecar unseals)
       test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
       interval: 30s
       timeout: 4s
       retries: 5
+    profiles: ["bundled"]
+
+  # ── Vault auto-unseal sidecar ────────────────────────────────────
+  # Initializes Vault once (storing the unseal key + root token on a private
+  # volume) and keeps it unsealed across restarts, so the stack self-recovers
+  # with no manual step. Drop this service to switch to manual unseal.
+  vault-unseal:
+    image: openbao/openbao:latest
+    container_name: rudder-vault-unseal
+    depends_on:
+      vault:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/unseal.sh"]
+    environment:
+      BAO_ADDR: http://vault:8200
+    volumes:
+      - ./vault/unseal.sh:/unseal.sh:ro
+      - vault-shared:/vault-shared
+    networks: [rudder]
+    restart: unless-stopped
     profiles: ["bundled"]
 
   # ── Bundled Git server (seeded demo source) ──────────────────────
@@ -115,10 +137,12 @@ services:
     container_name: rudder-target
     environment:
       VAULT_ADDR:         ${VAULT_URL:-http://vault:8200}
-      VAULT_TOKEN:        ${VAULT_DEV_TOKEN:-}
+      VAULT_TOKEN_FILE:   /vault-shared/root-token
       VAULT_KV_MOUNT:     secret
       SSH_KEY_VAULT_PATH: rudder/ssh-deploy-key
       TARGET_USER:        rudder
+    volumes:
+      - vault-shared:/vault-shared:ro
     networks: [rudder]
     restart: unless-stopped
     profiles: ["backend"]
@@ -135,7 +159,7 @@ services:
         condition: service_started
     environment:
       VAULT_ADDR:          ${VAULT_URL:-http://vault:8200}
-      VAULT_TOKEN:         ${VAULT_DEV_TOKEN:-}
+      VAULT_TOKEN_FILE:    /vault-shared/root-token
       VAULT_KV_MOUNT:      secret
       SSH_KEY_VAULT_PATH:  rudder/ssh-deploy-key
       PUSHGATEWAY_URL:     http://pushgateway:9091
@@ -150,6 +174,7 @@ services:
     volumes:
       - gitea-shared:/shared
       - cp-work:/app/work
+      - vault-shared:/vault-shared:ro
     networks: [rudder]
     restart: unless-stopped
     profiles: ["backend"]
