@@ -101,9 +101,11 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
             {r.provider === "ado" ? <Icons.azure size={18} style={{ color: "var(--text-2)" }} /> : <Icons.github size={18} style={{ color: "var(--text-2)" }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="mono" style={{ fontSize: "var(--fs-sm)", color: "var(--text)", fontWeight: 550 }}>{r.slug}</div>
-              <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>branch {r.branch} · added {relTime(r.addedAt)}</div>
+              <div style={{ fontSize: 11.5, color: r.error ? "var(--fail)" : "var(--text-faint)", marginTop: 2 }}>
+                {r.error ? `sync failed: ${r.error}` : `branch ${r.branch} · added ${relTime(r.addedAt)}`}
+              </div>
             </div>
-            <StatusPill s="ok" size="sm">connected</StatusPill>
+            <StatusPill s={r.error ? "fail" : "ok"} size="sm">{r.error ? "Error" : "connected"}</StatusPill>
             <Btn size="sm" kind="ghost" danger icon={Icons.x} onClick={() => removeRepo(r.id)}>Remove</Btn>
           </SettingsRow>
         )) : (
@@ -198,6 +200,7 @@ export function ConnectScreen({ nav }: { nav: NavFn }) {
   const [prov, setProv] = React.useState("git");
   const [repo, setRepo] = React.useState("");
   const [branch, setBranch] = React.useState("main");
+  const [token, setToken] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
 
@@ -214,7 +217,8 @@ export function ConnectScreen({ nav }: { nav: NavFn }) {
     if (!url) { setErr("Enter a repository URL."); return; }
     setBusy(true); setErr(null);
     try {
-      await addRepo({ provider: prov, url, branch: branch.trim() || "main" });
+      const rec = await addRepo({ provider: prov, url, branch: branch.trim() || "main", token: token.trim() || undefined });
+      if (rec && rec.error) { setErr(rec.error); setBusy(false); return; }
       nav("overview");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to connect repository");
@@ -252,9 +256,14 @@ export function ConnectScreen({ nav }: { nav: NavFn }) {
         <input value={branch} onChange={(e) => setBranch(e.target.value)} spellCheck={false} className="mono focusable"
           style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 16 }} />
 
+        <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>
+          Access token <span style={{ color: "var(--text-faint)", fontWeight: 400 }}>· private repos only</span>
+        </label>
+        <input value={token} onChange={(e) => setToken(e.target.value)} type="password" placeholder="ghp_… / Azure DevOps PAT" spellCheck={false} className="mono focusable"
+          style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 10 }} />
         <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line-soft)", marginBottom: 18 }}>
-          <Icons.key size={15} style={{ color: "var(--text-3)" }} />
-          <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>Auth uses a deploy key / token stored in Vault as a secret reference — never entered here.</span>
+          <Icons.key size={15} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+          <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>Stored in Vault, never shown again and never committed. Use a fine-grained, read-only token. Leave blank for public repos.</span>
         </div>
 
         {err && <div style={{ fontSize: "var(--fs-xs)", color: "var(--fail)", marginBottom: 12 }}>{err}</div>}

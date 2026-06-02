@@ -26,7 +26,7 @@ export interface DataCtx {
   toast: ToastData | null;
   flash: (msg: string, kind?: string, sub?: string) => void;
   refresh: () => void;
-  addRepo: (r: NewRepo) => Promise<void>;
+  addRepo: (r: NewRepo) => Promise<ConnectedRepo>;
   removeRepo: (id: string) => Promise<void>;
   runJob: (name: string) => Promise<void>;
   reconcileNow: () => Promise<void>;
@@ -85,9 +85,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [refresh, live]);
 
   const addRepo = React.useCallback(async (r: NewRepo) => {
-    await api.addRepo(r);
-    flash(`Connected ${r.url}`, "ok", "cloning + reconciling");
+    const rec = await api.addRepo(r);
+    if (rec && rec.error) flash(`Connected, but sync failed: ${rec.error}`, "fail");
+    else flash(`Connected ${r.url}`, "ok", "cloning + reconciling");
     await refresh();
+    return rec;
   }, [flash, refresh]);
 
   const removeRepo = React.useCallback(async (id: string) => {

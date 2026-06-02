@@ -64,6 +64,48 @@ export function ManifestScreen({ nav }: { nav: NavFn }) {
       actionLabel="Connect a repository" onAction={() => nav("connect")} />;
   }
 
+  // Repo cloned, but no Rudder manifest → guide the operator to add one.
+  if (doc && !doc.found) {
+    const example = doc.playbooks.slice(0, 2).map((pb, i) =>
+      `- name: ${pb.split("/").pop()!.replace(/\.ya?ml$/, "") || `job-${i + 1}`}\n  cron: "0 3 * * *"\n  playbook: ${pb}\n  limit: all`
+    ).join("\n\n") || `- name: my-job\n  cron: "0 3 * * *"\n  playbook: playbooks/site.yml\n  limit: all`;
+    return (
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "22px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
+        <h1 style={{ margin: 0, fontSize: "var(--fs-xl)", fontWeight: 660, letterSpacing: "-.01em" }}>Manifest</h1>
+        <Card style={{ marginTop: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Icons.alert size={18} style={{ color: "var(--warn)" }} />
+            <span style={{ fontSize: "var(--fs-md)", fontWeight: 640 }}>No <span className="mono">ansible/jobs.yml</span> found in <span className="mono">{doc.slug}</span></span>
+          </div>
+          <p style={{ margin: "10px 0 0", fontSize: "var(--fs-sm)", color: "var(--text-3)", lineHeight: 1.6 }}>
+            Rudder is a GitOps <strong>scheduler</strong> — it runs the playbooks you declare in a manifest, on the cron you set.
+            Your repo cloned fine, but it has no <span className="mono">ansible/jobs.yml</span> (or top-level <span className="mono">jobs.yml</span>),
+            so there's nothing to schedule yet. Add one like this and open a PR:
+          </p>
+          <div style={{ background: "var(--term-bg)", border: "1px solid var(--line)", borderRadius: "var(--r-md)", marginTop: 14 }}>
+            <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--line)", fontSize: "var(--fs-xs)", color: "var(--text-faint)" }} className="mono">ansible/jobs.yml</div>
+            <pre className="mono" style={{ margin: 0, padding: "12px 14px", fontSize: 12.5, lineHeight: 1.7, color: "var(--text-2)", overflow: "auto" }}>{example}</pre>
+          </div>
+        </Card>
+
+        <Card style={{ marginTop: "var(--gap)" }}>
+          <div style={{ fontSize: "var(--fs-md)", fontWeight: 640, marginBottom: 4 }}>Playbooks discovered in your repo</div>
+          <p style={{ margin: "0 0 12px", fontSize: "var(--fs-xs)", color: "var(--text-3)" }}>{doc.playbooks.length} file{doc.playbooks.length === 1 ? "" : "s"} that look like playbooks — reference any of these in <span className="mono">jobs.yml</span>.</p>
+          {doc.playbooks.length ? (
+            <div style={{ display: "grid", gap: 6 }}>
+              {doc.playbooks.map((pb) => (
+                <div key={pb} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 10px", borderRadius: "var(--r-sm)", background: "var(--surface-2)", border: "1px solid var(--line-soft)" }}>
+                  <Icons.doc size={14} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+                  <span className="mono" style={{ fontSize: 12, color: "var(--text-2)" }}>{pb}</span>
+                </div>
+              ))}
+            </div>
+          ) : <div style={{ fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>No playbooks detected.</div>}
+        </Card>
+      </div>
+    );
+  }
+
   const files = [
     { k: "jobs" as const, name: "ansible/jobs.yml", desc: "Job manifest — schedules, playbooks, targets", text: doc?.jobsYaml || "" },
     { k: "rudder" as const, name: "rudder.yml", desc: "Operational config — reconcile, observability, vault, alerts", text: doc?.rudderYaml || "" },

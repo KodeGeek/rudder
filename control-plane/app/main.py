@@ -122,17 +122,19 @@ class RepoIn(BaseModel):
     provider: str = "git"
     url: str
     branch: str = "main"
+    token: str = ""
 
 
 @app.post("/repos")
 def add_repo(body: RepoIn):
-    rec = store.add_repo(body.provider, body.url, body.branch)
+    rec = store.add_repo(body.provider, body.url, body.branch, body.token)
     try:
         store.reconcile_repo(rec["id"])
         schedule_all()
     except Exception as e:
         print("main: reconcile of new repo failed:", e)
-    return rec
+    # surface a clone/auth error so the UI can show why a repo isn't syncing
+    return store.repos.get(rec["id"], rec)
 
 
 @app.delete("/repos/{rid:path}")

@@ -103,6 +103,28 @@ def seed_demo_secrets():
             _kv_write(f"rudder/{name}", {"value": "(placeholder)", **meta})
 
 
+def _repo_path(rid: str) -> str:
+    safe = rid.replace(":", "_").replace("/", "_")
+    return f"rudder/repo-creds/{safe}"
+
+
+def set_repo_token(rid: str, token: str):
+    _kv_write(_repo_path(rid), {"token": token})
+
+
+def get_repo_token(rid: str):
+    d = _kv_read(_repo_path(rid))
+    return (d or {}).get("token")
+
+
+def delete_repo_token(rid: str):
+    try:
+        client().secrets.kv.v2.delete_metadata_and_all_versions(
+            path=_repo_path(rid), mount_point=config.VAULT_KV_MOUNT)
+    except Exception:
+        pass
+
+
 def list_secret_refs() -> list:
     names = ["ssh-deploy-key", "ado-pat", "github-app", "registry-pull"]
     out = []

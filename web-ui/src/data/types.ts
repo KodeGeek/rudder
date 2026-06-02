@@ -124,6 +124,9 @@ export interface ConnectedRepo {
   branch: string;
   url: string;
   addedAt: number;
+  auth?: boolean;
+  /** transient: set when the last clone/fetch failed (e.g. auth) */
+  error?: string;
 }
 
 export interface Channel {

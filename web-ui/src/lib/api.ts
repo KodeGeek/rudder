@@ -25,8 +25,11 @@ async function send<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export interface Info { bundledRepoUrl: string | null; reconcileInterval: string }
-export interface ManifestDoc { jobsYaml: string; rudderYaml: string; slug: string; branch: string; provider: string }
-export interface NewRepo { provider: string; url: string; branch: string }
+export interface ManifestDoc {
+  jobsYaml: string; rudderYaml: string; found: boolean; playbooks: string[];
+  slug: string; branch: string; provider: string;
+}
+export interface NewRepo { provider: string; url: string; branch: string; token?: string }
 
 export const api = {
   info: () => get<Info>("/info"),

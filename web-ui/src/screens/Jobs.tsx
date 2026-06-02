@@ -87,6 +87,11 @@ export function JobsScreen({ nav, initialFilter }: { nav: NavFn; initialFilter?:
       body="Jobs are rendered from a connected repository's manifest. Connect one to get started."
       actionLabel="Connect a repository" onAction={() => nav("connect")} />;
   }
+  if (!loading && jobs.length === 0) {
+    return <EmptyState icon={Icons.doc} title="No scheduled jobs"
+      body="Your connected repository has no ansible/jobs.yml manifest, so there's nothing to schedule yet. The Manifest screen shows what to add (and the playbooks Rudder found in your repo)."
+      actionLabel="View manifest" onAction={() => nav("manifest")} />;
+  }
 
   const counts: Record<string, number> = { all: jobs.length };
   FILTERS.forEach((f) => { if (f.k !== "all") counts[f.k] = jobs.filter((j) => j.status === f.k).length; });
