@@ -1,0 +1,231 @@
+# ── Rudder — segmented stack ────────────────────────────────────
+# Every component is its own container with its own healthcheck and restart
+# policy. The web-ui has NO hard dependency on the backends (its proxy resolves
+# upstreams lazily), so any single container failing never takes the UI down —
+# it just shows "stale / no data" until that piece recovers.
+#
+# Profiles let you pick what runs:
+#   docker compose up                                       # web-ui only (demo data)
+#   docker compose --profile bundled up                     # + vault, prometheus, pushgateway, loki
+#   docker compose --profile bundled --profile backend up   # + control-plane (Phase 2)
+#   docker compose --profile bundled --profile grafana up   # + grafana
+#
+# Copy .env.example → .env to configure endpoints / mode.
+name: rudder
+
+networks:
+  rudder:
+
+volumes:
+  prometheus-data:
+  loki-data:
+  grafana-data:
+  vault-data:
+  vault-shared:     # unseal key + root token, written by vault-unseal (never in git)
+  gitea-data:
+  gitea-shared:
+  cp-work:
+
+services:
+  # ── The product: read-only observability UI ──────────────────────
+  web-ui:
+    build: ./web-ui
+    image: rudder-web-ui:latest
+    container_name: rudder-web-ui
+    environment:
+      DATA_SOURCE:       ${DATA_SOURCE:-mock}
+      PROMETHEUS_URL:    ${PROMETHEUS_URL:-http://prometheus:9090}
+      LOKI_URL:          ${LOKI_URL:-http://loki:3100}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://control-plane:8090}
+      VAULT_URL:         ${VAULT_URL:-http://vault:8200}
+    ports:
+      - "8080:80"        # → http://localhost:8080
+    networks: [rudder]
+    restart: unless-stopped
+    # NOTE: intentionally NO depends_on — the UI must stay up even when every
+    # backend is down. Fault isolation by design.
+    healthcheck:
+      # 127.0.0.1 not localhost: nginx is IPv4-only; localhost may resolve to ::1.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # ── Vault: SSH private keys + encrypted secrets for Ansible auth ──
+  # OpenBao (Apache-2.0 Vault fork). Swap for hashicorp/vault if you prefer.
+  # PRODUCTION file storage: secrets are encrypted at rest and persist across
+  # restarts. The vault-unseal sidecar initializes it once and auto-unseals it.
+  # No token is committed — the root token is generated at init and kept on a
+  # private volume. For production, run a real sealed Vault instead (SECURITY.md).
+  vault:
+    image: openbao/openbao:latest
+    container_name: rudder-vault
+    command: server -config=/openbao/config/config.hcl
+    volumes:
+      - vault-data:/openbao/file
+      - ./vault/config.hcl:/openbao/config/config.hcl:ro
+    networks: [rudder]
+    restart: unless-stopped
+    healthcheck:
+      # exit 0 = unsealed/ready; exit 2 = sealed (briefly, until the sidecar unseals)
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 30s
+      timeout: 4s
+      retries: 5
+    profiles: ["bundled"]
+
+  # ── Vault auto-unseal sidecar ────────────────────────────────────
+  # Initializes Vault once (storing the unseal key + root token on a private
+  # volume) and keeps it unsealed across restarts, so the stack self-recovers
+  # with no manual step. Drop this service to switch to manual unseal.
+  vault-unseal:
+    image: openbao/openbao:latest
+    container_name: rudder-vault-unseal
+    depends_on:
+      vault:
+        condition: service_started
+    entrypoint: ["/bin/sh", "/unseal.sh"]
+    environment:
+      BAO_ADDR: http://vault:8200
+    volumes:
+      - ./vault/unseal.sh:/unseal.sh:ro
+      - vault-shared:/vault-shared
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["bundled"]
+
+  # ── Bundled Git server (seeded demo source) ──────────────────────
+  # gitea-init is a one-shot: it creates an admin + API token (written to a
+  # shared volume, never committed). The control-plane seeds the demo repo via
+  # the Gitea API on first boot.
+  gitea-init:
+    image: gitea/gitea:1.22
+    container_name: rudder-gitea-init
+    user: root
+    entrypoint: ["/bin/sh", "/init.sh"]
+    environment:
+      GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-rudder}
+      GITEA_ADMIN_PASSWORD: ${GITEA_ADMIN_PASSWORD:-}
+    volumes:
+      - gitea-data:/data
+      - gitea-shared:/shared
+      - ./gitea/init.sh:/init.sh:ro
+    networks: [rudder]
+    profiles: ["backend"]
+
+  gitea:
+    image: gitea/gitea:1.22
+    container_name: rudder-gitea
+    depends_on:
+      gitea-init:
+        condition: service_completed_successfully
+    volumes:
+      - gitea-data:/data
+    networks: [rudder]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/v1/version"]
+      interval: 15s
+      timeout: 4s
+      retries: 8
+    profiles: ["backend"]
+
+  # ── Ansible run target: real sshd host jobs land on ──────────────
+  target:
+    build: ./target
+    image: rudder-target:latest
+    container_name: rudder-target
+    environment:
+      VAULT_ADDR:         ${VAULT_URL:-http://vault:8200}
+      VAULT_TOKEN_FILE:   /vault-shared/root-token
+      VAULT_KV_MOUNT:     secret
+      SSH_KEY_VAULT_PATH: rudder/ssh-deploy-key
+      TARGET_USER:        rudder
+    volumes:
+      - vault-shared:/vault-shared:ro
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["backend"]
+
+  # ── Control plane: reconcile loop + job runner + API ─────────────
+  # Clones the Git repo, renders jobs.yml → cron, runs Ansible against the
+  # target using an SSH key from Vault, pushes metrics + logs, serves the API.
+  control-plane:
+    build: ./control-plane
+    image: rudder-control-plane:latest
+    container_name: rudder-control-plane
+    depends_on:
+      gitea:
+        condition: service_started
+    environment:
+      VAULT_ADDR:          ${VAULT_URL:-http://vault:8200}
+      VAULT_TOKEN_FILE:    /vault-shared/root-token
+      VAULT_KV_MOUNT:      secret
+      SSH_KEY_VAULT_PATH:  rudder/ssh-deploy-key
+      PUSHGATEWAY_URL:     http://pushgateway:9091
+      LOKI_URL:            ${LOKI_URL:-http://loki:3100}
+      GITEA_URL:           http://gitea:3000
+      GITEA_TOKEN_FILE:    /shared/gitea-token
+      GITEA_ADMIN_USER:    ${GITEA_ADMIN_USER:-rudder}
+      GITEA_SEED:          "true"
+      TARGET_HOST:         target
+      TARGET_USER:         rudder
+      RECONCILE_INTERVAL:  ${RECONCILE_INTERVAL:-2m}
+    volumes:
+      - gitea-shared:/shared
+      - cp-work:/app/work
+      - vault-shared:/vault-shared:ro
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["backend"]
+
+  # ── Metrics store ────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: rudder-prometheus
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [rudder]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 4s
+      retries: 4
+    profiles: ["bundled"]
+
+  # ── Pushgateway: short-lived cron jobs push metrics here ─────────
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: rudder-pushgateway
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["bundled"]
+
+  # ── Log store for run-log drill-down ─────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: rudder-loki
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks: [rudder]
+    restart: unless-stopped
+    # NOTE: the grafana/loki image is distroless (no shell/wget), so a CMD
+    # healthcheck isn't possible. Readiness is verified at /ready by callers.
+    profiles: ["bundled"]
+
+  # ── Optional: Grafana for power users ────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: rudder-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks: [rudder]
+    restart: unless-stopped
+    profiles: ["grafana"]

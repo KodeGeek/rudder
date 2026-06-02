@@ -1,0 +1,158 @@
+/* ============================================================
+   Rudder — design tokens
+   Dark-first, terminal-adjacent ops aesthetic.
+   Theme is switched via [data-theme="dark"|"light"] on <html>.
+   Accent + status colors derive from a single --accent via color-mix.
+   ============================================================ */
+
+:root {
+  /* ---- Accent (brand) — violet by default. Everything else derives from it
+         via color-mix. ---- */
+  --accent:        oklch(0.62 0.20 285);
+  --accent-strong: color-mix(in oklab, var(--accent), black 13%);
+  --accent-soft:   color-mix(in oklab, var(--accent), transparent 86%);
+  --accent-line:   color-mix(in oklab, var(--accent), transparent 58%);
+  --accent-text:   color-mix(in oklab, var(--accent), white 24%);
+
+  /* ---- Status semantics (§5.4) ---- */
+  --ok:     oklch(0.72 0.17 155);   /* green  = success      */
+  --ok-dim: oklch(0.72 0.17 155 / 0.16);
+  --fail:   oklch(0.64 0.21 25);    /* red    = failed       */
+  --fail-dim: oklch(0.64 0.21 25 / 0.16);
+  --warn:   oklch(0.78 0.16 75);    /* amber  = running/stale*/
+  --warn-dim: oklch(0.78 0.16 75 / 0.16);
+  --idle:   oklch(0.62 0.02 270);   /* grey   = never run    */
+  --idle-dim: oklch(0.62 0.02 270 / 0.14);
+
+  /* ---- Radii ---- */
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 13px;
+  --r-xl: 18px;
+
+  /* ---- Density (overridable) ---- */
+  --gap: 16px;
+  --pad: 20px;
+  --row-h: 52px;
+
+  /* ---- Type ---- */
+  --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --fs-micro: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 27px;
+  --fs-3xl: 38px;
+}
+
+/* ---------- DARK (default) ---------- */
+:root, [data-theme="dark"] {
+  --bg:        oklch(0.17 0.012 270);
+  --bg-grid:   oklch(0.21 0.013 270);
+  --surface:   oklch(0.205 0.013 270);
+  --surface-2: oklch(0.235 0.014 270);
+  --surface-3: oklch(0.27 0.015 270);
+  --raised:    oklch(0.225 0.014 270);
+
+  --line:      oklch(0.30 0.012 270);
+  --line-soft: oklch(0.26 0.012 270);
+
+  --text:      oklch(0.96 0.008 270);
+  --text-2:    oklch(0.78 0.012 270);
+  --text-3:    oklch(0.62 0.012 270);
+  --text-faint:oklch(0.50 0.012 270);
+
+  --shadow-1: 0 1px 0 0 oklch(1 0 0 / 0.03) inset, 0 1px 2px oklch(0 0 0 / 0.4);
+  --shadow-2: 0 1px 0 0 oklch(1 0 0 / 0.04) inset, 0 8px 24px -8px oklch(0 0 0 / 0.55);
+  --shadow-pop: 0 1px 0 0 oklch(1 0 0 / 0.05) inset, 0 18px 50px -12px oklch(0 0 0 / 0.7);
+
+  --term-bg: oklch(0.145 0.012 270);
+  color-scheme: dark;
+}
+
+/* ---------- LIGHT ---------- */
+[data-theme="light"] {
+  --bg:        oklch(0.975 0.004 270);
+  --bg-grid:   oklch(0.93 0.005 270);
+  --surface:   oklch(1 0 0);
+  --surface-2: oklch(0.985 0.003 270);
+  --surface-3: oklch(0.955 0.004 270);
+  --raised:    oklch(1 0 0);
+
+  --line:      oklch(0.90 0.005 270);
+  --line-soft: oklch(0.935 0.004 270);
+
+  --text:      oklch(0.24 0.02 270);
+  --text-2:    oklch(0.42 0.018 270);
+  --text-3:    oklch(0.56 0.015 270);
+  --text-faint:oklch(0.68 0.012 270);
+
+  --accent-text:   color-mix(in oklab, var(--accent), black 6%);
+  --accent-soft:   color-mix(in oklab, var(--accent), transparent 90%);
+  --ok-dim:   oklch(0.72 0.17 155 / 0.14);
+  --fail-dim: oklch(0.64 0.21 25 / 0.12);
+  --warn-dim: oklch(0.78 0.16 75 / 0.18);
+  --idle-dim: oklch(0.62 0.02 270 / 0.12);
+
+  --shadow-1: 0 1px 2px oklch(0.2 0.02 270 / 0.06), 0 0 0 1px oklch(0.2 0.02 270 / 0.02);
+  --shadow-2: 0 4px 16px -4px oklch(0.2 0.02 270 / 0.12);
+  --shadow-pop: 0 18px 50px -12px oklch(0.2 0.02 270 / 0.22);
+
+  --term-bg: oklch(0.20 0.015 270);
+  color-scheme: light;
+}
+
+/* ---------- density variants ---------- */
+[data-density="compact"] { --gap: 11px; --pad: 14px; --row-h: 42px; }
+[data-density="comfy"]   { --gap: 22px; --pad: 28px; --row-h: 62px; }
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root { height: 100%; }
+
+::selection { background: var(--accent-soft); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
+
+button { font-family: inherit; cursor: pointer; }
+input, textarea, select { font-family: inherit; }
+
+.mono { font-family: var(--font-mono); font-feature-settings: "ss01","zero"; }
+
+/* shared focus ring */
+.focusable:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse-dot { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes screen-in { from { transform: translateY(9px); } to { transform: translateY(0); } }
+@keyframes sheen { to { background-position: 200% 0; } }
+@keyframes caret-blink { 0%, 45% { opacity: 1; } 50%, 95% { opacity: 0; } 100% { opacity: 1; } }

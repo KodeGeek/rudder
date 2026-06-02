@@ -1,0 +1,21 @@
+# Rudder job manifest — the source of truth for the schedule.
+# Each entry is one scheduled Ansible run. Edit in Git → open a PR → the
+# control-plane reconciles on its next pull and regenerates the schedule.
+- name: ping-fleet
+  cron: "*/2 * * * *"
+  playbook: ansible/playbooks/ping.yml
+  limit: targets
+  desc: Reachability + uptime check across the fleet.
+
+- name: set-motd
+  cron: "*/5 * * * *"
+  playbook: ansible/playbooks/motd.yml
+  limit: targets
+  kind: dsc
+  desc: Ensure the managed message-of-the-day is present (heals drift).
+
+- name: disk-check
+  cron: "*/3 * * * *"
+  playbook: ansible/playbooks/disk-check.yml
+  limit: targets
+  desc: Report root filesystem usage.

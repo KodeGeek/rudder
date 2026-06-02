@@ -1,0 +1,55 @@
+# ── Control plane — reconcile loop + job runner + API (PHASE 2) ──
+# Pulls SSH keys/secrets from Vault, renders the Git manifest → cron, runs
+# Ansible, and pushes metrics + logs. Placeholder until the backend lands —
+# build & push rudder-control-plane, create the vault-dev secret, then
+# uncomment 50-control-plane.yaml in kustomization.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  namespace: rudder
+  labels: { app.kubernetes.io/name: control-plane }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: control-plane }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: control-plane }
+    spec:
+      containers:
+        - name: control-plane
+          image: rudder-control-plane:latest   # ← replace with your registry path
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8090
+          env:
+            - name: VAULT_ADDR
+              value: "http://vault:8200"
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef: { name: vault-dev, key: root-token }   # created out-of-band
+            - name: PUSHGATEWAY_URL
+              value: "http://pushgateway:9091"
+            - name: LOKI_URL
+              value: "http://loki:3100"
+            - name: RECONCILE_INTERVAL
+              value: "15m"
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8090 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits:   { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  namespace: rudder
+spec:
+  selector: { app.kubernetes.io/name: control-plane }
+  ports:
+    - port: 8090
+      targetPort: 8090

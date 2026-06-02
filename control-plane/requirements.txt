@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+apscheduler
+hvac
+PyYAML
+requests
+prometheus-client
+# full ansible community distribution — bundles community.docker, community.general,
+# ansible.posix, etc. so common playbooks resolve without a repo requirements.yml
+ansible

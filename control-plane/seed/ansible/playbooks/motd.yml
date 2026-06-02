@@ -1,0 +1,14 @@
+---
+- name: Manage MOTD (desired-state)
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Ensure managed MOTD is present
+      ansible.builtin.copy:
+        dest: /etc/motd
+        content: |
+          ────────────────────────────────────────
+           Managed by Rudder — GitOps control plane
+          ────────────────────────────────────────
+        mode: "0644"

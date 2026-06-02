@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-density="regular">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Rudder — GitOps Control Plane</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #16161c;
+      }
+      #rudder-root-loading {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: #16161c;
+        color: #7a7a85;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        font-size: 13px;
+      }
+    </style>
+    <!-- Runtime config: regenerated from env in the container. Loaded BEFORE the
+         bundle so window.RUDDER_CONFIG exists when the app boots. Never bundled
+         (lives in public/), so endpoints can change without rebuilding. -->
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <div id="root"><div id="rudder-root-loading">loading control plane…</div></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

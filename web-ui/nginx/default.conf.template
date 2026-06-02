@@ -1,0 +1,72 @@
+# Rudder web-ui — nginx site config TEMPLATE.
+# ${VARS} below are substituted from the environment at container start
+# (NGINX_ENVSUBST_FILTER restricts substitution to our own vars so nginx's
+# own $variables are left untouched).
+#
+# These endpoints are BOOTSTRAP config only — they tell the UI where to reach
+# the backends. The operational configuration (jobs, schedules, channels,
+# reconcile interval, secret references) lives in Git, not here.
+
+server {
+    listen       80;
+    server_name  _;
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    server_tokens off;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # DNS resolver, auto-detected from the container's resolv.conf at startup
+    # (127.0.0.11 on Docker, CoreDNS on Kubernetes). Lets proxy_pass resolve
+    # upstreams LAZILY at request time — a down backend never stops the UI from
+    # starting or serving; those requests just 502/503 and the UI shows its
+    # "stale / no data" states.
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 256;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+    # ── same-origin proxies to the backends (no CORS, endpoints stay server-side) ──
+    location ~ ^/api/prometheus/(.*)$ {
+        set $up_prom "${PROMETHEUS_URL}";
+        if ($up_prom = "") { return 503; }
+        proxy_ssl_server_name on;
+        proxy_connect_timeout 4s;
+        proxy_pass $up_prom/$1$is_args$args;
+    }
+    location ~ ^/api/loki/(.*)$ {
+        set $up_loki "${LOKI_URL}";
+        if ($up_loki = "") { return 503; }
+        proxy_ssl_server_name on;
+        proxy_connect_timeout 4s;
+        proxy_pass $up_loki/$1$is_args$args;
+    }
+    location ~ ^/api/control-plane/(.*)$ {
+        set $up_cp "${CONTROL_PLANE_URL}";
+        if ($up_cp = "") { return 503; }
+        proxy_ssl_server_name on;
+        proxy_connect_timeout 4s;
+        proxy_pass $up_cp/$1$is_args$args;
+    }
+    # Vault is proxied for a liveness pill ONLY — restricted to the unauthenticated
+    # health endpoint. The rest of the Vault HTTP API must never be reachable from
+    # the browser (secrets live behind it; the control-plane is its only client).
+    location = /api/vault/v1/sys/health {
+        set $up_vault "${VAULT_URL}";
+        if ($up_vault = "") { return 503; }
+        proxy_ssl_server_name on;
+        proxy_connect_timeout 4s;
+        proxy_pass $up_vault/v1/sys/health$is_args$args;
+    }
+
+    # ── static app ──
+    # config.js + index.html must never be cached (runtime config / app entry).
+    # Vite emits content-hashed assets under /assets/, safe to cache forever.
+    location = /index.html { add_header Cache-Control "no-cache"; }
+    location = /config.js  { add_header Cache-Control "no-cache"; }
+    location /assets/      { add_header Cache-Control "public, max-age=31536000, immutable"; }
+    location / { try_files $uri $uri/ /index.html; }
+}

@@ -1,0 +1,13 @@
+---
+- name: Disk usage check
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Check root filesystem usage
+      ansible.builtin.command: df -h /
+      register: df
+      changed_when: false
+
+    - name: Report usage
+      ansible.builtin.debug:
+        msg: "{{ df.stdout_lines }}"
