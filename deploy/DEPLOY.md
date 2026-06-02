@@ -9,7 +9,7 @@ static, **read-only** observability app; all configuration lives in Git.
         │            │
         ├─ proxies → ├─ /api/prometheus → Prometheus   (metrics §5.2)
         │            ├─ /api/loki        → Loki         (run logs §5.3)
-        │            ├─ /api/vault       → Vault/OpenBao (SSH keys + secrets)
+        │            ├─ /api/vault       → Vault health check only (liveness pill)
         │            └─ /api/control-plane → control-plane (reconcile + API, Phase 2)
         └────────────┘
 ```
@@ -47,29 +47,29 @@ bundled ones; or run the bundled copies with `--profile bundled`.
 
 ## Secrets
 
-Nothing secret-shaped is committed to this repo.
+Nothing secret-shaped is committed to this repo, and nothing secret is ever
+returned to the browser. See **[SECURITY.md](../SECURITY.md)** for the full model.
 
-- `.env` is git-ignored — copy `.env.example` → `.env` and fill in values.
-- The bundled Vault dev token has **no committed default**. Optionally pin one in
-  `.env` (otherwise OpenBao generates a dev root token at start, printed in its
-  logs):
-  ```bash
-  echo "VAULT_DEV_TOKEN=$(openssl rand -hex 16)" >> .env
-  ```
-- On Kubernetes the Vault token is read from a Secret you create out-of-band (see
-  below) — it is never stored in a manifest.
+- `.env` is git-ignored — copy `.env.example` → `.env` and fill in non-secret
+  bootstrap values (mode + endpoints). There is **no Vault token to set** for the
+  bundled stack: the auto-unseal sidecar generates the root token at init and
+  keeps it on a private volume.
+- The bundled Vault (Docker) uses **encrypted file storage and auto-unseals**, so
+  SSH keys and ansible-vault passwords are encrypted at rest and survive restarts.
+- Per-repo run credentials (SSH private key, ansible-vault password, Git token)
+  are **write-only**: pasted into the UI, stored in Vault, never displayed again.
+- On Kubernetes the Vault token is read from a Secret you create out-of-band — it
+  is never stored in a manifest.
 
-In production, run a real Vault/OpenBao with a proper unseal flow, persistent
-storage, and least-privilege policies. Secret *values* are written to Vault
-out-of-band; Rudder only references and rotates them — they are never returned
-to the browser.
+For production, run a real sealed Vault/OpenBao with KMS/HSM auto-unseal and a
+least-privilege policy for the control-plane (read/write under `secret/rudder/*`).
 
 ---
 
 ## Docker
 
 ```bash
-cp .env.example .env             # set DATA_SOURCE + endpoints (+ VAULT_DEV_TOKEN for bundled)
+cp .env.example .env             # set DATA_SOURCE + endpoints (no Vault token needed)
 
 # just the UI (demo data, or external endpoints via .env)
 docker compose up --build        # → http://localhost:8080
@@ -78,8 +78,7 @@ docker compose up --build        # → http://localhost:8080
 docker compose --profile bundled up --build
 
 # FULL STACK (live): + control-plane, bundled Gitea (seeded), and an SSH target.
-# Set a shared dev Vault token and live mode first:
-echo "VAULT_DEV_TOKEN=$(openssl rand -hex 16)" >> .env
+# The bundled Vault auto-unseals — just enable live mode:
 echo "DATA_SOURCE=live" >> .env
 docker compose --profile bundled --profile backend up --build
 #   → http://localhost:8080 — connect the bundled repo (URL prefilled in the
@@ -91,11 +90,16 @@ docker compose --profile bundled --profile grafana up --build
 
 ### Point at a real GitHub / Azure DevOps repo
 
-The provider adapters clone over HTTPS. Connect a real repo from the UI (or
-`POST /api/control-plane/repos`) — it must contain `ansible/jobs.yml` +
-playbooks. For private repos, store the PAT/deploy key in Vault and reference it
-(auth wiring per provider is the next iteration; the bundled Gitea path needs no
-secret).
+Connect a real repo from **Settings → Connect** (or `POST /api/control-plane/repos`).
+It must contain a job manifest (`jobs.yml` anywhere in the repo — a bare list or
+under a `jobs:` / `scheduled_jobs:` key) plus your playbooks and inventory.
+
+- **Public repos** clone over HTTPS with no secret.
+- **Private repos** authenticate with an access token (GitHub PAT or Azure DevOps
+  PAT) or a generated **deploy key** — both stored write-only in Vault.
+- **Run credentials** (the SSH private key your fleet authorizes + any
+  ansible-vault password) are pasted into the **Credentials** screen, also
+  write-only into Vault.
 
 Plain Docker, pointed at external infra:
 
@@ -141,6 +145,10 @@ kubectl -n rudder create secret generic vault-dev \
 kubectl apply -k deploy/k8s
 ```
 
+> Note: the bundled **k8s** Vault manifest still runs in dev mode — the encrypted
+> file storage + auto-unseal setup currently ships in the Docker Compose stack.
+> For k8s production, point the control-plane at your own sealed Vault.
+
 Point the UI at **external** Prometheus/Loki/Vault by editing the
 `web-ui-config` ConfigMap in `10-web-ui.yaml` (or drop the bundled Deployments
 and set the URLs to your existing services). The control-plane manifest
@@ -151,8 +159,9 @@ its image exists (Phase 2).
 
 ## Notes
 
-- **Vault** runs in dev mode in the bundled stack (demo only). In production use
-  a real unseal flow, persistent storage, and least-privilege policies.
+- **Vault** in the bundled Docker stack uses encrypted file storage + auto-unseal
+  (secrets persist across restarts). For production, use a real sealed Vault with
+  KMS/HSM auto-unseal and least-privilege policies — see [SECURITY.md](../SECURITY.md).
 - The UI is fully self-contained — React, fonts, and all assets are bundled at
   build time, so the running container makes **zero external network calls**.
 
