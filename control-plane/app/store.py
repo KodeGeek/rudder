@@ -140,6 +140,9 @@ def _ssh_url(url: str) -> str:
     path = p.path.strip("/")
     if path.endswith(".git"):
         path = path[:-4]
+    if host == "github.com" or host.endswith(".github.com"):
+        # github.com:22 is often blocked; SSH over 443 via ssh.github.com is reliable.
+        return f"ssh://git@ssh.github.com:443/{path}.git"
     if "dev.azure.com" in host or "visualstudio.com" in host:
         # https://dev.azure.com/org/project/_git/repo → git@ssh.dev.azure.com:v3/org/project/repo
         return f"git@ssh.dev.azure.com:v3/{path.replace('/_git/', '/')}"
@@ -254,6 +257,8 @@ def _discover_playbooks(wd: str) -> list:
             dirs.remove(".git")
         for f in files:
             if not f.endswith((".yml", ".yaml")):
+                continue
+            if _INV_RE.match(f):  # don't list inventory files as playbooks
                 continue
             p = os.path.join(root, f)
             try:
