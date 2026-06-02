@@ -125,6 +125,60 @@ def delete_repo_token(rid: str):
         pass
 
 
+def _deploy_path(rid: str) -> str:
+    safe = rid.replace(":", "_").replace("/", "_")
+    return f"rudder/repo-deploy-keys/{safe}"
+
+
+def ensure_repo_deploy_key(rid: str) -> str:
+    """Generate a per-repo ed25519 deploy keypair in Vault if absent; return the
+    PUBLIC key (the operator adds it to the repo's deploy keys)."""
+    d = _kv_read(_deploy_path(rid))
+    if d and d.get("private") and d.get("public"):
+        return d["public"]
+    tmp = tempfile.mkdtemp()
+    kf = os.path.join(tmp, "id")
+    subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-f", kf, "-C", "rudder-deploy-key"],
+                   check=True, capture_output=True)
+    priv = open(kf).read()
+    pub = open(kf + ".pub").read().strip()
+    _kv_write(_deploy_path(rid), {"private": priv, "public": pub})
+    for f in (kf, kf + ".pub"):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+    try:
+        os.rmdir(tmp)
+    except OSError:
+        pass
+    return pub
+
+
+def repo_deploy_public(rid: str):
+    d = _kv_read(_deploy_path(rid))
+    return (d or {}).get("public")
+
+
+def repo_deploy_private_tempfile(rid: str) -> str:
+    d = _kv_read(_deploy_path(rid))
+    if not d or not d.get("private"):
+        raise RuntimeError("deploy key not found in Vault")
+    fd, path = tempfile.mkstemp(prefix="rudder_deploy_")
+    with os.fdopen(fd, "w") as f:
+        f.write(d["private"])
+    os.chmod(path, 0o600)
+    return path
+
+
+def delete_repo_deploy_key(rid: str):
+    try:
+        client().secrets.kv.v2.delete_metadata_and_all_versions(
+            path=_deploy_path(rid), mount_point=config.VAULT_KV_MOUNT)
+    except Exception:
+        pass
+
+
 def list_secret_refs() -> list:
     names = ["ssh-deploy-key", "ado-pat", "github-app", "registry-pull"]
     out = []

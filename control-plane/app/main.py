@@ -123,11 +123,12 @@ class RepoIn(BaseModel):
     url: str
     branch: str = "main"
     token: str = ""
+    authMethod: str = ""
 
 
 @app.post("/repos")
 def add_repo(body: RepoIn):
-    rec = store.add_repo(body.provider, body.url, body.branch, body.token)
+    rec = store.add_repo(body.provider, body.url, body.branch, body.token, body.authMethod)
     try:
         store.reconcile_repo(rec["id"])
         schedule_all()
@@ -135,6 +136,20 @@ def add_repo(body: RepoIn):
         print("main: reconcile of new repo failed:", e)
     # surface a clone/auth error so the UI can show why a repo isn't syncing
     return store.repos.get(rec["id"], rec)
+
+
+class DeployKeyIn(BaseModel):
+    provider: str = "git"
+    url: str
+
+
+@app.post("/deploy-key")
+def deploy_key(body: DeployKeyIn):
+    """Generate (if needed) a per-repo deploy keypair; return the PUBLIC key for
+    the operator to add to the repo's deploy keys on the provider side."""
+    rid = f"{body.provider}:{store._slug(body.url)}"
+    pub = vault.ensure_repo_deploy_key(rid)
+    return {"rid": rid, "publicKey": pub, "sshUrl": store._ssh_url(body.url)}
 
 
 @app.delete("/repos/{rid:path}")

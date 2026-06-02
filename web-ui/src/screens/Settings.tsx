@@ -6,6 +6,7 @@ import { Icons, type IconFn } from "../components/icons";
 import { relTime } from "../lib/format";
 import { getConfig } from "../lib/config";
 import { useData } from "../lib/data";
+import { api } from "../lib/api";
 import type { NavFn, RouteParams } from "../data/types";
 
 function SettingsRow({ children, last }: { children?: React.ReactNode; last?: boolean }) {
@@ -109,7 +110,7 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
             {r.error && (
               <Btn size="sm" kind="solid" icon={Icons.key}
                 onClick={() => nav("connect", { provider: r.provider, url: r.url, branch: r.branch, prompt: true })}>
-                Add token
+                Add credentials
               </Btn>
             )}
             <Btn size="sm" kind="ghost" danger icon={Icons.x} onClick={() => removeRepo(r.id)}>Remove</Btn>
@@ -201,43 +202,77 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
 }
 
 /* ========== ONBOARDING: connect a repo (real — POSTs to the control-plane) ========== */
+const AUTH_METHODS = [
+  ["none", "Public"],
+  ["token", "Access token"],
+  ["deploykey", "Deploy key"],
+] as const;
+
 export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParams }) {
   const { addRepo, info } = useData();
   const [prov, setProv] = React.useState<string>(params?.provider || "git");
   const [repo, setRepo] = React.useState<string>(params?.url || "");
   const [branch, setBranch] = React.useState<string>(params?.branch || "main");
+  // auth: "none" (public) · "token" (PAT — GitHub or Azure DevOps) · "deploykey" (SSH, GitHub)
+  const [method, setMethod] = React.useState<string>(
+    params?.prompt ? (params?.provider === "ado" ? "token" : "deploykey") : "none"
+  );
   const [token, setToken] = React.useState("");
+  const [pubKey, setPubKey] = React.useState("");
+  const [genBusy, setGenBusy] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
-  // when true, this repo needs a token — highlight + focus the token field
-  const [authNeeded, setAuthNeeded] = React.useState<boolean>(!!params?.prompt);
   const tokenRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (prov === "git" && info?.bundledRepoUrl && !repo && !params?.url) setRepo(info.bundledRepoUrl);
   }, [prov, info, repo, params]);
-  React.useEffect(() => { if (authNeeded) tokenRef.current?.focus(); }, [authNeeded]);
+  React.useEffect(() => { if (method === "token") tokenRef.current?.focus(); }, [method]);
 
   const isAuthErr = (e: string) =>
-    /could not read username|authentication failed|terminal prompts disabled|\b403\b|denied|unauthorized|invalid username or password/i.test(e);
+    /could not read username|authentication failed|terminal prompts disabled|\b403\b|denied|unauthorized|invalid username or password|permission denied|host key/i.test(e);
 
   const placeholder = prov === "github" ? "https://github.com/org/repo.git"
     : prov === "ado" ? "https://dev.azure.com/org/project/_git/repo"
     : (info?.bundledRepoUrl || "http://gitea:3000/org/repo.git");
 
+  const genKey = async () => {
+    const url = (repo || "").trim();
+    if (!url) { setErr("Enter the repository URL first."); return; }
+    setGenBusy(true); setErr(null);
+    try {
+      const r = await api.deployKey({ provider: prov, url });
+      setPubKey(r.publicKey);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to generate deploy key");
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
+  const copyKey = () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(pubKey).catch(() => {});
+    setCopied(true); setTimeout(() => setCopied(false), 1400);
+  };
+
   const connect = async () => {
     const url = (repo || "").trim();
     if (!url) { setErr("Enter a repository URL."); return; }
+    if (method === "deploykey" && !pubKey) { setErr("Generate the deploy key and add it to your repo first."); return; }
     setBusy(true); setErr(null);
     try {
-      const rec = await addRepo({ provider: prov, url, branch: branch.trim() || "main", token: token.trim() || undefined });
+      const rec = await addRepo({
+        provider: prov, url, branch: branch.trim() || "main",
+        authMethod: method, token: method === "token" ? (token.trim() || undefined) : undefined,
+      });
       if (rec && rec.error) {
         setBusy(false);
         if (isAuthErr(rec.error)) {
-          setAuthNeeded(true);
-          setErr(token.trim()
-            ? "Authentication failed — check the token has read access to this repo."
-            : "This repository is private — paste a read-only access token below and retry.");
+          if (method === "none") setMethod(prov === "ado" ? "token" : "deploykey");
+          setErr(method === "deploykey"
+            ? "Still can't authenticate — make sure the deploy key above is added to the repo with read access."
+            : "This repository is private — add credentials below and retry.");
         } else {
           setErr(rec.error);
         }
@@ -249,6 +284,12 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
       setBusy(false);
     }
   };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)",
+    border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 16,
+  };
+  const connectLabel = busy ? "Connecting…" : method === "deploykey" ? "I've added the key — connect" : "Connect & sync";
 
   return (
     <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
@@ -263,7 +304,7 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
         <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>Provider</label>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           {([["git", "Git URL", Icons.git], ["github", "GitHub", Icons.github], ["ado", "Azure DevOps", Icons.azure]] as const).map(([k, t, I]) => (
-            <button key={k} onClick={() => { setProv(k); setRepo(""); }}
+            <button key={k} onClick={() => { setProv(k); setRepo(""); setPubKey(""); }}
               style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, justifyContent: "center", padding: "10px 8px", borderRadius: "var(--r-md)",
                 border: "1px solid", borderColor: prov === k ? "var(--accent-line)" : "var(--line)", background: prov === k ? "var(--accent-soft)" : "transparent",
                 color: prov === k ? "var(--accent-text)" : "var(--text-2)", fontSize: "var(--fs-xs)", fontWeight: 600 }}>
@@ -273,45 +314,79 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
         </div>
 
         <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>Repository URL</label>
-        <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder={placeholder} spellCheck={false} className="mono focusable"
-          style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 16 }} />
+        <input value={repo} onChange={(e) => { setRepo(e.target.value); setPubKey(""); }} placeholder={placeholder} spellCheck={false} className="mono focusable" style={inputStyle} />
 
         <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>Branch</label>
-        <input value={branch} onChange={(e) => setBranch(e.target.value)} spellCheck={false} className="mono focusable"
-          style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line)", color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 16 }} />
+        <input value={branch} onChange={(e) => setBranch(e.target.value)} spellCheck={false} className="mono focusable" style={inputStyle} />
 
-        {authNeeded && (
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)",
-            background: "var(--accent-soft)", border: "1px solid var(--accent-line)", marginBottom: 14 }}>
-            <Icons.key size={15} style={{ color: "var(--accent-text)", flexShrink: 0, marginTop: 1 }} />
-            <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>
-              This repository is <strong>private</strong>. Paste a read-only access token below and retry — Rudder stores it in Vault and clones with it.
-            </span>
+        {/* ── Authentication ── */}
+        <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>Authentication</label>
+        <div style={{ display: "inline-flex", padding: 3, background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--r-md)", gap: 2, marginBottom: 14 }}>
+          {AUTH_METHODS.map(([k, t]) => (
+            <button key={k} onClick={() => setMethod(k)}
+              style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: method === k ? "var(--surface-3)" : "transparent",
+                color: method === k ? "var(--text)" : "var(--text-3)", fontSize: "var(--fs-xs)", fontWeight: method === k ? 600 : 500 }}>
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {method === "none" && (
+          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", marginBottom: 18 }}>
+            For a public repository, no credentials are needed.
           </div>
         )}
 
-        <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>
-          Access token <span style={{ color: authNeeded ? "var(--accent-text)" : "var(--text-faint)", fontWeight: 400 }}>
-            {authNeeded ? "· required for this private repo" : "· private repos only"}
-          </span>
-        </label>
-        <input ref={tokenRef} value={token} onChange={(e) => setToken(e.target.value)} type="password"
-          placeholder="ghp_… / Azure DevOps PAT" spellCheck={false} className="mono focusable"
-          onKeyDown={(e) => { if (e.key === "Enter") connect(); }}
-          style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: "var(--r-md)", background: "var(--surface-2)",
-            border: `1px solid ${authNeeded ? "var(--accent)" : "var(--line)"}`, color: "var(--text)", fontSize: "var(--fs-sm)", marginBottom: 10 }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line-soft)", marginBottom: 18 }}>
-          <Icons.key size={15} style={{ color: "var(--text-3)", flexShrink: 0 }} />
-          <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>Stored in Vault, never shown again and never committed. Use a fine-grained, read-only token. Leave blank for public repos.</span>
-        </div>
+        {method === "token" && (
+          <>
+            <input ref={tokenRef} value={token} onChange={(e) => setToken(e.target.value)} type="password"
+              placeholder={prov === "ado" ? "Azure DevOps PAT" : "ghp_… personal access token"} spellCheck={false} className="mono focusable"
+              onKeyDown={(e) => { if (e.key === "Enter") connect(); }} style={{ ...inputStyle, marginBottom: 10 }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line-soft)", marginBottom: 18 }}>
+              <Icons.key size={15} style={{ color: "var(--text-3)", flexShrink: 0 }} />
+              <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>Stored in Vault, never shown again, never committed. Use a fine-grained, read-only token. Works for GitHub and Azure DevOps.</span>
+            </div>
+          </>
+        )}
+
+        {method === "deploykey" && (
+          <div style={{ marginBottom: 18 }}>
+            {!pubKey ? (
+              <>
+                <Btn kind="solid" icon={genBusy ? Icons.refresh : Icons.key} disabled={genBusy || !repo.trim()} onClick={genKey}>
+                  {genBusy ? "Generating…" : "Generate deploy key"}
+                </Btn>
+                <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 8 }}>Rudder generates an SSH keypair and keeps the private half in Vault.</div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>Add this read-only deploy key to your repo</span>
+                  <button onClick={copyKey} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: copied ? "var(--ok)" : "var(--text-3)", background: "none", border: "none" }}>
+                    {copied ? <Icons.check size={13} /> : <Icons.copy size={13} />}{copied ? "copied" : "copy"}
+                  </button>
+                </div>
+                <textarea readOnly value={pubKey} spellCheck={false} className="mono"
+                  style={{ width: "100%", height: 74, padding: "8px 12px", borderRadius: "var(--r-md)", background: "var(--term-bg)", border: "1px solid var(--accent-line)", color: "var(--text-2)", fontSize: 11.5, lineHeight: 1.5, resize: "none", marginBottom: 10 }} />
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line-soft)" }}>
+                  <Icons.github size={15} style={{ color: "var(--text-3)", flexShrink: 0, marginTop: 1 }} />
+                  <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>
+                    GitHub → your repo → <strong>Settings → Deploy keys → Add deploy key</strong>. Paste this and leave “Allow write access” <strong>unchecked</strong>. Then click connect. (Azure DevOps: add under User settings → SSH public keys, or use a PAT instead.)
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {err && <div style={{ fontSize: "var(--fs-xs)", color: "var(--fail)", marginBottom: 12 }}>{err}</div>}
 
         <div style={{ display: "flex", gap: 9 }}>
           <Btn kind="ghost" onClick={() => nav("settings")}>Cancel</Btn>
           <span style={{ flex: 1 }} />
-          <Btn kind="primary" icon={busy ? Icons.refresh : undefined} iconR={busy ? undefined : Icons.chevR} disabled={busy} onClick={connect}>
-            {busy ? "Connecting…" : authNeeded ? "Retry with token" : "Connect & sync"}
+          <Btn kind="primary" icon={busy ? Icons.refresh : undefined} iconR={busy ? undefined : Icons.chevR}
+            disabled={busy || (method === "deploykey" && !pubKey)} onClick={connect}>
+            {connectLabel}
           </Btn>
         </div>
       </Card>

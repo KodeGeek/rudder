@@ -69,14 +69,15 @@ def _slug(url: str) -> str:
     return "/".join(parts[-2:]) if len(parts) >= 2 else (parts[-1] if parts else url)
 
 
-def add_repo(provider: str, url: str, branch: str, token: str = "") -> dict:
+def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method: str = "") -> dict:
+    method = auth_method or ("token" if token else "none")
     with _lock:
         slug = _slug(url)
         rid = f"{provider}:{slug}"
         repos[rid] = {
             "id": rid, "provider": provider, "slug": slug,
             "branch": branch or "main", "url": url, "addedAt": int(time.time() * 1000),
-            "auth": bool(token),
+            "auth": method != "none", "authMethod": method,
         }
         save_repos()
     if token:
@@ -99,6 +100,7 @@ def remove_repo(rid: str):
         save_repos()
     try:
         vault.delete_repo_token(rid)
+        vault.delete_repo_deploy_key(rid)
     except Exception:
         pass
 
@@ -129,27 +131,67 @@ def _auth_url(r: dict) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
+def _ssh_url(url: str) -> str:
+    """Convert an https repo URL to its SSH form for deploy-key clones."""
+    p = urlsplit(url)
+    if p.scheme not in ("http", "https"):
+        return url  # already ssh/scp form
+    host = p.netloc.split("@")[-1].split(":")[0]
+    path = p.path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if "dev.azure.com" in host or "visualstudio.com" in host:
+        # https://dev.azure.com/org/project/_git/repo → git@ssh.dev.azure.com:v3/org/project/repo
+        return f"git@ssh.dev.azure.com:v3/{path.replace('/_git/', '/')}"
+    return f"git@{host}:{path}.git"
+
+
 def reconcile_repo(rid: str):
     r = repos.get(rid)
     if not r:
         return
     wd = _workdir(rid)
     branch = r["branch"]
-    aurl = _auth_url(r)
-    ok, err = True, ""
-    if os.path.isdir(os.path.join(wd, ".git")):
-        f = subprocess.run(["git", "-C", wd, "fetch", "-q", aurl, branch], capture_output=True, text=True)
-        if f.returncode == 0:
-            subprocess.run(["git", "-C", wd, "reset", "--hard", "-q", "FETCH_HEAD"], capture_output=True)
-        else:
-            ok, err = False, f.stderr
+    deploy = r.get("authMethod") == "deploykey"
+    env = dict(os.environ)
+    key_path = None
+    if deploy:
+        try:
+            key_path = vault.repo_deploy_private_tempfile(rid)
+        except Exception as e:
+            r["error"] = f"deploy key missing from Vault: {e}"
+            return
+        env["GIT_SSH_COMMAND"] = (
+            f"ssh -i {key_path} -o IdentitiesOnly=yes "
+            "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        )
+        url = _ssh_url(r["url"])
     else:
-        os.makedirs(config.WORKDIR, exist_ok=True)
-        res = subprocess.run(["git", "clone", "-q", "--branch", branch, aurl, wd], capture_output=True, text=True)
-        if res.returncode == 0:
-            subprocess.run(["git", "-C", wd, "remote", "set-url", "origin", r["url"]], capture_output=True)  # scrub token
+        url = _auth_url(r)  # token-in-url or clean
+
+    ok, err = True, ""
+    try:
+        if os.path.isdir(os.path.join(wd, ".git")):
+            f = subprocess.run(["git", "-C", wd, "fetch", "-q", url, branch], capture_output=True, text=True, env=env)
+            if f.returncode == 0:
+                subprocess.run(["git", "-C", wd, "reset", "--hard", "-q", "FETCH_HEAD"], capture_output=True, env=env)
+            else:
+                ok, err = False, f.stderr
         else:
-            ok, err = False, res.stderr
+            os.makedirs(config.WORKDIR, exist_ok=True)
+            res = subprocess.run(["git", "clone", "-q", "--branch", branch, url, wd], capture_output=True, text=True, env=env)
+            if res.returncode == 0:
+                if not deploy:  # token URL → scrub creds from origin (ssh URLs carry no secret)
+                    subprocess.run(["git", "-C", wd, "remote", "set-url", "origin", r["url"]], capture_output=True)
+            else:
+                ok, err = False, res.stderr
+    finally:
+        if key_path and os.path.exists(key_path):
+            try:
+                os.remove(key_path)
+            except OSError:
+                pass
+
     if not ok:
         r["error"] = _redact(err.strip()) or "git operation failed"
         print(f"store: reconcile failed for {rid}: {_redact(err.strip())}")

@@ -29,12 +29,14 @@ export interface ManifestDoc {
   jobsYaml: string; rudderYaml: string; found: boolean; playbooks: string[];
   slug: string; branch: string; provider: string;
 }
-export interface NewRepo { provider: string; url: string; branch: string; token?: string }
+export interface NewRepo { provider: string; url: string; branch: string; token?: string; authMethod?: string }
+export interface DeployKey { rid: string; publicKey: string; sshUrl: string }
 
 export const api = {
   info: () => get<Info>("/info"),
   repos: () => get<ConnectedRepo[]>("/repos"),
   addRepo: (body: NewRepo) => send<ConnectedRepo>("POST", "/repos", body),
+  deployKey: (body: { provider: string; url: string }) => send<DeployKey>("POST", "/deploy-key", body),
   removeRepo: (id: string) => send<void>("DELETE", "/repos/" + id),
   jobs: () => get<Job[]>("/jobs"),
   job: (name: string) => get<Job>("/jobs/" + encodeURIComponent(name)),
