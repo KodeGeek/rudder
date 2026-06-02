@@ -179,6 +179,41 @@ def delete_repo_deploy_key(rid: str):
         pass
 
 
+def _vaultpass_path(rid: str) -> str:
+    safe = rid.replace(":", "_").replace("/", "_")
+    return f"rudder/repo-vault-pass/{safe}"
+
+
+def set_repo_vault_pass(rid: str, password: str):
+    _kv_write(_vaultpass_path(rid), {"password": password})
+
+
+def has_repo_vault_pass(rid: str) -> bool:
+    return bool((_kv_read(_vaultpass_path(rid)) or {}).get("password"))
+
+
+def repo_vault_pass_tempfile(rid: str):
+    """Write the repo's ansible-vault password to a 0600 tempfile for
+    --vault-password-file, or return None if none is stored."""
+    d = _kv_read(_vaultpass_path(rid))
+    pw = (d or {}).get("password")
+    if not pw:
+        return None
+    fd, path = tempfile.mkstemp(prefix="rudder_vaultpass_")
+    with os.fdopen(fd, "w") as f:
+        f.write(pw)
+    os.chmod(path, 0o600)
+    return path
+
+
+def delete_repo_vault_pass(rid: str):
+    try:
+        client().secrets.kv.v2.delete_metadata_and_all_versions(
+            path=_vaultpass_path(rid), mount_point=config.VAULT_KV_MOUNT)
+    except Exception:
+        pass
+
+
 def list_secret_refs() -> list:
     names = ["ssh-deploy-key", "ado-pat", "github-app", "registry-pull"]
     out = []

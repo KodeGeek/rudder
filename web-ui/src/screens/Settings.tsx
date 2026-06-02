@@ -218,6 +218,7 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
     params?.prompt ? (params?.provider === "ado" ? "token" : "deploykey") : "none"
   );
   const [token, setToken] = React.useState("");
+  const [vaultPass, setVaultPass] = React.useState("");
   const [pubKey, setPubKey] = React.useState("");
   const [genBusy, setGenBusy] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
@@ -265,6 +266,7 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
       const rec = await addRepo({
         provider: prov, url, branch: branch.trim() || "main",
         authMethod: method, token: method === "token" ? (token.trim() || undefined) : undefined,
+        vaultPass: vaultPass.trim() || undefined,
       });
       if (rec && rec.error) {
         setBusy(false);
@@ -378,6 +380,17 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
             )}
           </div>
         )}
+
+        {/* ── Ansible Vault password (for repos with ansible-vault encrypted vars) ── */}
+        <label style={{ display: "block", fontSize: "var(--fs-sm)", fontWeight: 600, marginBottom: 7 }}>
+          Ansible Vault password <span style={{ color: "var(--text-faint)", fontWeight: 400 }}>· optional</span>
+        </label>
+        <input value={vaultPass} onChange={(e) => setVaultPass(e.target.value)} type="password"
+          placeholder="decrypts group_vars/**/vault.yml etc." spellCheck={false} className="mono focusable" style={{ ...inputStyle, marginBottom: 10 }} />
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 9, padding: "11px 13px", borderRadius: "var(--r-md)", background: "var(--surface-2)", border: "1px solid var(--line-soft)", marginBottom: 18 }}>
+          <Icons.key size={15} style={{ color: "var(--text-3)", flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>If your repo uses <span className="mono">ansible-vault</span> (e.g. encrypted <span className="mono">group_vars</span>), enter the vault password. Stored in Vault and passed to runs via <span className="mono">--vault-password-file</span> — never shown or committed.</span>
+        </div>
 
         {err && <div style={{ fontSize: "var(--fs-xs)", color: "var(--fail)", marginBottom: 12 }}>{err}</div>}
 

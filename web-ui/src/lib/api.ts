@@ -29,7 +29,7 @@ export interface ManifestDoc {
   jobsYaml: string; rudderYaml: string; found: boolean; playbooks: string[];
   slug: string; branch: string; provider: string;
 }
-export interface NewRepo { provider: string; url: string; branch: string; token?: string; authMethod?: string }
+export interface NewRepo { provider: string; url: string; branch: string; token?: string; authMethod?: string; vaultPass?: string }
 export interface DeployKey { rid: string; publicKey: string; sshUrl: string }
 
 export const api = {

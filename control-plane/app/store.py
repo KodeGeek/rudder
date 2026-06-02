@@ -69,7 +69,14 @@ def _slug(url: str) -> str:
     return "/".join(parts[-2:]) if len(parts) >= 2 else (parts[-1] if parts else url)
 
 
-def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method: str = "") -> dict:
+def _safe_has_vault_pass(rid: str) -> bool:
+    try:
+        return vault.has_repo_vault_pass(rid)
+    except Exception:
+        return False
+
+
+def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method: str = "", vault_pass: str = "") -> dict:
     method = auth_method or ("token" if token else "none")
     with _lock:
         slug = _slug(url)
@@ -78,6 +85,7 @@ def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method:
             "id": rid, "provider": provider, "slug": slug,
             "branch": branch or "main", "url": url, "addedAt": int(time.time() * 1000),
             "auth": method != "none", "authMethod": method,
+            "vaultPass": bool(vault_pass) or _safe_has_vault_pass(rid),
         }
         save_repos()
     if token:
@@ -85,6 +93,12 @@ def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method:
             vault.set_repo_token(rid, token)
         except Exception as e:
             print("store: failed to store repo token in vault:", e)
+    if vault_pass:
+        try:
+            vault.set_repo_vault_pass(rid, vault_pass)
+            repos[rid]["vaultPass"] = True
+        except Exception as e:
+            print("store: failed to store ansible-vault password in vault:", e)
     return repos[rid]
 
 
@@ -101,6 +115,7 @@ def remove_repo(rid: str):
     try:
         vault.delete_repo_token(rid)
         vault.delete_repo_deploy_key(rid)
+        vault.delete_repo_vault_pass(rid)
     except Exception:
         pass
 

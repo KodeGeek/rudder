@@ -58,13 +58,20 @@ def run_job(name: str, manual: bool = False):
     })
 
     started = time.time()
-    key_path = inv_path = None
+    key_path = inv_path = vp_path = None
     try:
         key_path = vault.private_key_tempfile()
         inv_path, grp = _inventory(j["limit"])
         limit = j["limit"] if j["limit"] and j["limit"] != "all" else grp
         playbook = os.path.join(j["_workdir"], j["playbook"])
         cmd = ["ansible-playbook", playbook, "-i", inv_path, "--limit", limit, "--private-key", key_path]
+        # decrypt ansible-vault content using the repo's password from Vault, if any
+        try:
+            vp_path = vault.repo_vault_pass_tempfile(j.get("_repoId", ""))
+        except Exception:
+            vp_path = None
+        if vp_path:
+            cmd += ["--vault-password-file", vp_path]
         if j.get("args"):
             cmd += str(j["args"]).split()
         env = dict(
@@ -81,7 +88,7 @@ def run_job(name: str, manual: bool = False):
     except Exception as e:
         out, exit_code = f"control-plane error: {e}", 1
     finally:
-        for p in (key_path, inv_path):
+        for p in (key_path, inv_path, vp_path):
             if p and os.path.exists(p):
                 try:
                     os.remove(p)

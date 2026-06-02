@@ -124,11 +124,12 @@ class RepoIn(BaseModel):
     branch: str = "main"
     token: str = ""
     authMethod: str = ""
+    vaultPass: str = ""
 
 
 @app.post("/repos")
 def add_repo(body: RepoIn):
-    rec = store.add_repo(body.provider, body.url, body.branch, body.token, body.authMethod)
+    rec = store.add_repo(body.provider, body.url, body.branch, body.token, body.authMethod, body.vaultPass)
     try:
         store.reconcile_repo(rec["id"])
         schedule_all()
