@@ -25,13 +25,35 @@ const NAV: NavItem[] = [
   { k: "settings", label: "Settings", icon: Icons.settings },
 ];
 
+// Route is mirrored to the URL hash so a refresh / back-forward keeps the screen.
+function parseHash(): { name: string; params: RouteParams } {
+  const h = (typeof location !== "undefined" ? location.hash : "").replace(/^#\/?/, "");
+  if (!h) return { name: "overview", params: {} };
+  const [path, query = ""] = h.split("?");
+  const seg = path.split("/");
+  const name = seg[0] || "overview";
+  const params: RouteParams = {};
+  new URLSearchParams(query).forEach((v, k) => { params[k] = v; });
+  if (name === "job" && seg[1]) params.name = decodeURIComponent(seg[1]);
+  return { name, params };
+}
+
+function routeToHash(r: { name: string; params: RouteParams }): string {
+  if (r.name === "job" && r.params.name) return `#/job/${encodeURIComponent(r.params.name)}`;
+  const qs = new URLSearchParams();
+  if (r.name === "jobs" && r.params.f) qs.set("f", String(r.params.f));
+  if (r.name === "activity" && r.params.filter) qs.set("filter", String(r.params.filter));
+  const q = qs.toString();
+  return `#/${r.name}${q ? "?" + q : ""}`;
+}
+
 export function App() {
   const data = useData();
   const [theme, setTheme] = React.useState<Theme>(() => {
     const saved = typeof localStorage !== "undefined" ? localStorage.getItem("rudder-theme") : null;
     return saved === "light" || saved === "dark" ? saved : "dark";
   });
-  const [route, setRoute] = React.useState<{ name: string; params: RouteParams }>({ name: "overview", params: {} });
+  const [route, setRoute] = React.useState<{ name: string; params: RouteParams }>(() => parseHash());
 
   React.useEffect(() => {
     const r = document.documentElement;
@@ -40,8 +62,16 @@ export function App() {
     try { localStorage.setItem("rudder-theme", theme); } catch { /* ignore */ }
   }, [theme]);
 
+  // back/forward (and manual hash edits) re-read the route from the URL
+  React.useEffect(() => {
+    const onPop = () => setRoute(parseHash());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   const nav: NavFn = (name, params = {}) => {
     setRoute({ name, params });
+    try { history.pushState({}, "", routeToHash({ name, params })); } catch { /* ignore */ }
     const main = document.getElementById("rudder-main");
     if (main) main.scrollTop = 0;
   };
