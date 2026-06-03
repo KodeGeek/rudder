@@ -54,7 +54,7 @@ datastore is a prerequisite for tenant isolation, run-history integrity, audit
 immutability, and horizontal scale. So the roadmap is deliberately ordered:
 harden the foundation first, make it portable, then govern, then scale.
 
-### M1 — Trust Floor *(in progress)*
+### M1 — Trust Floor *(done)*
 Make Rudder safe to expose beyond localhost and safe against data loss.
 - API authentication: a shared `RUDDER_API_KEY` guarding all routes, with a
   localhost/unset fallback so existing single-host installs keep working. Real
@@ -69,7 +69,7 @@ Make Rudder safe to expose beyond localhost and safe against data loss.
 - First **CI** (compile, typecheck, build, **secret scan**) + first tests +
   pinned dependencies.
 
-### M2 — Portable one-command deploy
+### M2 — Portable one-command deploy *(done)*
 A published **Helm chart** + public **multi-arch images** (GHCR) that install
 cleanly on docker-compose, vanilla k8s, and AKS / EKS / GKE / OpenShift without
 editing manifests. Parameterized storage class, service type (NodePort /
