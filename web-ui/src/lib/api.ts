@@ -8,8 +8,32 @@ import type {
 
 const base = () => getConfig().controlPlane.proxy;
 
+// Thrown on HTTP 401 so callers can tell "unauthorized" (→ login) apart from
+// "backend down" (→ keep the resilient UI). The token is a shared API key the
+// operator pastes once; real SSO is handled by a reverse proxy in front.
+export class AuthError extends Error {}
+
+const TOKEN_KEY = "rudder_token";
+export const getToken = (): string => {
+  try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
+};
+export const setToken = (t: string): void => {
+  try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ }
+};
+export const clearToken = (): void => {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+};
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> | undefined {
+  const h: Record<string, string> = { ...(extra || {}) };
+  const t = getToken();
+  if (t) h["Authorization"] = `Bearer ${t}`;
+  return Object.keys(h).length ? h : undefined;
+}
+
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(base() + path, { cache: "no-store" });
+  const r = await fetch(base() + path, { cache: "no-store", headers: authHeaders() });
+  if (r.status === 401) throw new AuthError(`GET ${path} → 401`);
   if (!r.ok) throw new Error(`GET ${path} → ${r.status}`);
   return r.json() as Promise<T>;
 }
@@ -17,12 +41,15 @@ async function get<T>(path: string): Promise<T> {
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(base() + path, {
     method,
-    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers: authHeaders(body !== undefined ? { "Content-Type": "application/json" } : undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (r.status === 401) throw new AuthError(`${method} ${path} → 401`);
   if (!r.ok) throw new Error(`${method} ${path} → ${r.status}`);
   return (r.status === 204 ? undefined : await r.json()) as T;
 }
+
+export interface AuthInfo { ok: boolean; role: string; authRequired: boolean }
 
 export interface Info { bundledRepoUrl: string | null; reconcileInterval: string }
 export interface ManifestDoc {
@@ -44,6 +71,7 @@ export const api = {
   removeRepo: (id: string) => send<void>("DELETE", "/repos/" + id),
   jobs: () => get<Job[]>("/jobs"),
   job: (name: string) => get<Job>("/jobs/" + encodeURIComponent(name)),
+  verify: () => get<AuthInfo>("/auth/verify"),
   runJob: (name: string) => send<{ started: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/run"),
   stopRun: (name: string, runId: string) =>
     send<{ stopped: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/runs/" + encodeURIComponent(runId) + "/stop"),

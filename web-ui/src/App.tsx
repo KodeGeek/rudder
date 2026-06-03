@@ -12,6 +12,8 @@ import { JobDetailScreen } from "./screens/JobDetail";
 import { ManifestScreen } from "./screens/Manifest";
 import { ActivityScreen, InventoryScreen } from "./screens/Activity";
 import { SettingsScreen, ConnectScreen, CredentialsScreen } from "./screens/Settings";
+import { LoginScreen } from "./screens/Login";
+import { getToken } from "./lib/api";
 
 type Theme = "dark" | "light";
 type NavItem = { k: string; label: string; icon: IconFn };
@@ -76,8 +78,12 @@ export function App() {
     if (main) main.scrollTop = 0;
   };
 
+  // Mid-session 401 (e.g. key rotated): drop back to the login screen.
+  if (data.unauthorized) return <LoginScreen onSuccess={data.refresh} />;
+
   const failing = data.jobs.filter((j) => j.status === "fail").length;
   const running = data.jobs.filter((j) => j.status === "running").length;
+  const signedIn = !!getToken();
 
   let screen: React.ReactNode;
   const p = route.params;
@@ -165,6 +171,7 @@ export function App() {
             </span>
           )}
           <IconBtn icon={theme === "dark" ? Icons.sun : Icons.moon} title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} />
+          {signedIn && <IconBtn icon={Icons.key} title="Sign out" onClick={() => data.signOut()} />}
           <Btn kind="solid" size="sm" icon={Icons.refresh} onClick={() => data.reconcileNow()}>Reconcile now</Btn>
         </header>
 

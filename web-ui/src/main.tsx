@@ -5,12 +5,15 @@ import "@fontsource-variable/geist-mono";
 import "./styles/tokens.css";
 import { App } from "./App";
 import { DataProvider } from "./lib/data";
+import { AuthGate } from "./screens/Login";
 
 const el = document.getElementById("root");
 if (el) {
   ReactDOM.createRoot(el).render(
-    <DataProvider>
-      <App />
-    </DataProvider>
+    <AuthGate>
+      <DataProvider>
+        <App />
+      </DataProvider>
+    </AuthGate>
   );
 }
