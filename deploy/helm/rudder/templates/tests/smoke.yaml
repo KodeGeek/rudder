@@ -1,0 +1,25 @@
+{{- /* Post-install smoke check: `helm test rudder`. Verifies each component's
+       health endpoint is reachable in-namespace. */ -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "rudder.fullname" . }}-smoke
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: smoke
+      image: curlimages/curl:8.11.1
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -e
+          echo "→ web-ui";        curl -fsS -o /dev/null  http://web-ui.{{ .Release.Namespace }}.svc.cluster.local/
+          echo "→ control-plane"; curl -fsS               http://control-plane.{{ .Release.Namespace }}.svc.cluster.local:8090/healthz
+          echo "→ prometheus";    curl -fsS -o /dev/null  http://prometheus.{{ .Release.Namespace }}.svc.cluster.local:9090/-/healthy
+          echo "→ vault";         curl -fsS -o /dev/null  http://vault.{{ .Release.Namespace }}.svc.cluster.local:8200/v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200
+          echo "all components reachable ✓"

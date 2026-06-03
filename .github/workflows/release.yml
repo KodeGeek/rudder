@@ -1,0 +1,59 @@
+name: Release
+
+# Build + push multi-arch images to GHCR on a version tag, so users never build
+# locally. Pair with: helm install rudder oci://ghcr.io/... (or the chart in-repo)
+# pointing image.registry at ghcr.io/<owner> and the tag at this release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component:
+          - { name: web-ui, context: web-ui }
+          - { name: control-plane, context: control-plane }
+          - { name: target, context: target }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          [ -z "$TAG" ] && TAG="${GITHUB_REF_NAME}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.component.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/rudder-${{ matrix.component.name }}:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/rudder-${{ matrix.component.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
