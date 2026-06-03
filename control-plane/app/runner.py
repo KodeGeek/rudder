@@ -48,6 +48,20 @@ def stop_run(run_id: str) -> bool:
     return True
 
 
+def _ssh_args() -> str:
+    """SSH options for Ansible. Trust-on-first-use against a persisted known_hosts
+    by default (MITM-safe after first contact), or strict if SSH_STRICT is set —
+    instead of the old blanket StrictHostKeyChecking=no that trusted any host."""
+    mode = "yes" if config.SSH_STRICT else "accept-new"
+    kh = config.SSH_KNOWN_HOSTS
+    try:
+        os.makedirs(os.path.dirname(kh), exist_ok=True)
+        open(kh, "a").close()
+    except OSError:
+        pass
+    return f"-o StrictHostKeyChecking={mode} -o UserKnownHostsFile={kh} -o ConnectTimeout=15"
+
+
 def _classify(line: str) -> str:
     s = line.strip()
     if s.startswith("PLAY RECAP"):
@@ -156,9 +170,9 @@ def run_job(name: str, manual: bool = False):
 
         env = dict(
             os.environ,
-            ANSIBLE_HOST_KEY_CHECKING="False",
+            ANSIBLE_HOST_KEY_CHECKING="True",
             ANSIBLE_RETRY_FILES_ENABLED="False",
-            ANSIBLE_SSH_ARGS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15",
+            ANSIBLE_SSH_ARGS=_ssh_args(),
         )
         if vp_path:
             # override ansible.cfg's vault_password_file (often an operator's local path)

@@ -28,6 +28,13 @@ GITEA_REPO = env("GITEA_REPO", "fleet")
 GITEA_SEED = env("GITEA_SEED", "true").lower() == "true"
 BUNDLED_REPO_URL = env("BUNDLED_REPO_URL", f"{GITEA_URL}/{GITEA_ORG}/{GITEA_REPO}.git")
 
+# ── SSH host-key trust ──
+# Persisted known_hosts on the work volume. Default policy is trust-on-first-use
+# (accept-new): unknown hosts are pinned on first contact, but a later key change
+# (MITM) is rejected. SSH_STRICT=true requires hosts to be pre-populated.
+SSH_KNOWN_HOSTS = env("SSH_KNOWN_HOSTS", "/app/work/known_hosts")
+SSH_STRICT = env("SSH_STRICT", "false").lower() == "true"
+
 # ── Ansible run target (bundled sshd container) ──
 TARGET_HOST = env("TARGET_HOST", "target")
 TARGET_USER = env("TARGET_USER", "rudder")
