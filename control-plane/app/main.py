@@ -95,6 +95,7 @@ def _boot():
     except Exception as e:
         print("main: gitea seed failed:", e)
     store.load_repos()
+    store.load_runs()
     if not scheduler.running:
         scheduler.start()
     reconcile_all()

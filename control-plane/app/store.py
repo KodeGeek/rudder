@@ -3,8 +3,9 @@
 Connected repos are persisted to a JSON file on a volume (survive restart). Jobs
 are rendered from each repo's `ansible/jobs.yml` on reconcile. Inventory is
 parsed from the repo's real Ansible inventory. Private repos authenticate with a
-token stored in Vault (never in repos.json). Run history is in-memory (the
-durable record lives in Prometheus + Loki).
+token stored in Vault (never in repos.json). Run history is persisted to a JSON
+file on the same volume as repos.json so it survives restarts; Prometheus + Loki
+remain the long-term durable record.
 """
 import json
 import os
@@ -123,6 +124,7 @@ def remove_repo(rid: str):
         repo_inventory.pop(rid, None)
         _rebuild_channels()
         save_repos()
+        save_runs()
     try:
         vault.delete_repo_token(rid)
         vault.delete_repo_deploy_key(rid)
@@ -536,10 +538,27 @@ def _parse_yaml_inventory(text: str):
 
 
 # ── run history ──
+def load_runs():
+    try:
+        if os.path.exists(config.RUNS_FILE):
+            runs.update(json.load(open(config.RUNS_FILE)))
+    except Exception as e:
+        print("store: load runs failed:", e)
+
+
+def save_runs():
+    try:
+        os.makedirs(os.path.dirname(config.RUNS_FILE), exist_ok=True)
+        json.dump(runs, open(config.RUNS_FILE, "w"))
+    except Exception as e:
+        print("store: save runs failed:", e)
+
+
 def add_run(name: str, run: dict):
     with _lock:
         runs.setdefault(name, []).insert(0, run)
         runs[name] = runs[name][:50]
+        save_runs()
 
 
 def replace_run(name: str, run_id: str, run: dict):
@@ -548,8 +567,10 @@ def replace_run(name: str, run_id: str, run: dict):
         for i, r in enumerate(lst):
             if r["id"] == run_id:
                 lst[i] = run
+                save_runs()
                 return
         lst.insert(0, run)
+        save_runs()
 
 
 # ── views (shaped for the web-ui types) ──
