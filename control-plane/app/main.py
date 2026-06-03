@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from . import config, gitea, runner, store, vault
+from . import config, gitea, host, runner, store, vault
 
 app = FastAPI(title="Rudder control-plane")
 scheduler = BackgroundScheduler(timezone="UTC")
@@ -239,6 +239,18 @@ def run_now(name: str):
         raise HTTPException(status_code=404, detail="job not found")
     runner.run_async(name)
     return {"started": True}
+
+
+@app.post("/jobs/{name}/runs/{run_id}/stop")
+def stop_run(name: str, run_id: str):
+    if name not in store.jobs:
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"stopped": runner.stop_run(run_id)}
+
+
+@app.get("/host-stats")
+def host_stats():
+    return host.stats()
 
 
 @app.get("/activity")

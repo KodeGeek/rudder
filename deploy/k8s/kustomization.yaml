@@ -26,3 +26,12 @@ resources:
   - 30-prometheus.yaml
   - 40-loki.yaml
   - 50-control-plane.yaml    # reconcile loop + Ansible runner + API
+
+# Image tags. `latest` is the default for a plain `kubectl apply -k deploy/k8s`.
+# The host20 deploy playbook overrides newTag with a unique per-build stamp so
+# that `apply` alone rolls the Deployments (no manual restart, no stale :latest).
+images:
+  - name: rudder-web-ui
+    newTag: latest
+  - name: rudder-control-plane
+    newTag: latest

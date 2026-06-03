@@ -55,6 +55,10 @@ spec:
           volumeMounts:
             - { name: vault-shared, mountPath: /vault-shared, readOnly: true }
             - { name: cp-work, mountPath: /app/work }
+            # Read-only host /proc + root fs so /host-stats reports node (host20)
+            # CPU/memory/disk for the Overview dashboard.
+            - { name: host-proc, mountPath: /host/proc, readOnly: true }
+            - { name: host-root, mountPath: /host/root, readOnly: true }
           resources:
             requests: { cpu: "50m", memory: "128Mi" }
             limits:   { cpu: "1", memory: "512Mi" }
@@ -63,6 +67,10 @@ spec:
           persistentVolumeClaim: { claimName: vault-shared }
         - name: cp-work
           persistentVolumeClaim: { claimName: cp-work }
+        - name: host-proc
+          hostPath: { path: /proc }
+        - name: host-root
+          hostPath: { path: / }
 ---
 apiVersion: v1
 kind: Service

@@ -31,6 +31,8 @@ export interface ManifestDoc {
 }
 export interface NewRepo { provider: string; url: string; branch: string; token?: string; authMethod?: string; vaultPass?: string }
 export interface DeployKey { rid: string; publicKey: string; sshUrl: string }
+export interface ResourceUse { used: number; total: number; pct: number }
+export interface HostStats { cpu?: number; mem?: ResourceUse; disk?: ResourceUse; source?: string; error?: string }
 
 export const api = {
   info: () => get<Info>("/info"),
@@ -43,6 +45,9 @@ export const api = {
   jobs: () => get<Job[]>("/jobs"),
   job: (name: string) => get<Job>("/jobs/" + encodeURIComponent(name)),
   runJob: (name: string) => send<{ started: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/run"),
+  stopRun: (name: string, runId: string) =>
+    send<{ stopped: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/runs/" + encodeURIComponent(runId) + "/stop"),
+  hostStats: () => get<HostStats>("/host-stats"),
   reconcile: () => get<Reconcile>("/reconcile"),
   reconcileNow: () => send<Reconcile>("POST", "/reconcile"),
   activity: () => get<ActivityItem[]>("/activity"),

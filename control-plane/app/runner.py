@@ -5,12 +5,46 @@ removed afterwards). Status/duration/exit/log are recorded; metrics + logs are
 pushed to Pushgateway and Loki.
 """
 import os
+import signal
 import subprocess
 import tempfile
 import threading
 import time
 
 from . import config, store, telemetry, vault
+
+
+# Live processes, keyed by run_id, so the UI can stop a run mid-flight.
+_running: dict = {}
+_stopped: set = set()
+
+
+def stop_run(run_id: str) -> bool:
+    """Stop a running playbook. Returns True if a live process was signalled.
+
+    Ansible forks worker + ssh children that inherit the stdout pipe; signalling
+    only the parent leaves them holding the pipe open, so the run never finalises.
+    We run the playbook in its own process group (start_new_session) and signal the
+    whole group, escalating to SIGKILL if it doesn't exit promptly."""
+    proc = _running.get(run_id)
+    if not proc or proc.poll() is not None:
+        return False
+    _stopped.add(run_id)
+    try:
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
+
+        def _hard_kill():
+            if proc.poll() is None:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        threading.Timer(5, _hard_kill).start()
+    except ProcessLookupError:
+        proc.kill()
+    return True
 
 
 def _classify(line: str) -> str:
@@ -80,6 +114,9 @@ def run_job(name: str, manual: bool = False):
     started = time.time()
     key_path = inv_tempfile = vp_path = None
     cwd = None
+    log_lines = []
+    timed_out = False
+    exit_code = 1
     try:
         # SSH key: the operator's fleet key if configured for this repo, else
         # Rudder's bundled run key (for the demo target).
@@ -125,14 +162,54 @@ def run_job(name: str, manual: bool = False):
         if vp_path:
             # override ansible.cfg's vault_password_file (often an operator's local path)
             env["ANSIBLE_VAULT_PASSWORD_FILE"] = vp_path
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=1800, env=env, cwd=cwd)
-        out = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
-        exit_code = proc.returncode
-    except subprocess.TimeoutExpired:
-        out, exit_code = "control-plane: playbook timed out (30m)", 124
+        # Force unbuffered, line-by-line Ansible output so we can stream it live.
+        env["PYTHONUNBUFFERED"] = "1"
+
+        # Stream stdout (with stderr merged in) line-by-line, appending each line
+        # to the run's log so the UI's poll shows progress as it happens.
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1, env=env, cwd=cwd,
+            start_new_session=True,   # own process group, so stop_run can kill ssh children too
+        )
+
+        def _on_timeout():
+            nonlocal timed_out
+            timed_out = True
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)   # whole group, incl. ssh children
+            except (ProcessLookupError, OSError):
+                proc.kill()
+
+        _running[run_id] = proc
+        timer = threading.Timer(1800, _on_timeout)
+        timer.start()
+        try:
+            for line in proc.stdout:
+                ln = line.rstrip("\n")
+                if not ln.strip():
+                    continue
+                entry = {"t": _classify(ln), "text": ln}
+                log_lines.append(entry)
+                store.append_run_log(name, run_id, entry)
+            proc.wait()
+        finally:
+            timer.cancel()
+
+        if timed_out:
+            log_lines.append({"t": "err", "text": "control-plane: playbook timed out (30m)"})
+            exit_code = 124
+        elif run_id in _stopped:
+            _stopped.discard(run_id)
+            log_lines.append({"t": "err", "text": "■ run stopped by operator"})
+            exit_code = 130
+        else:
+            exit_code = proc.returncode
     except Exception as e:
-        out, exit_code = f"control-plane error: {e}", 1
+        log_lines.append({"t": "err", "text": f"control-plane error: {e}"})
+        exit_code = 1
     finally:
+        _running.pop(run_id, None)
         for p in (key_path, inv_tempfile, vp_path):
             if p and os.path.exists(p):
                 try:
@@ -142,8 +219,8 @@ def run_job(name: str, manual: bool = False):
 
     duration = int(time.time() - started)
     status = "success" if exit_code == 0 else "failed"
-    log = [{"t": _classify(ln), "text": ln} for ln in out.splitlines() if ln.strip()][:400] \
-        or [{"t": "task", "text": "(no output)"}]
+    out = "\n".join(e["text"] for e in log_lines)
+    log = log_lines[-400:] or [{"t": "task", "text": "(no output)"}]
     store.replace_run(name, run_id, {
         "id": run_id, "at": int(time.time() * 1000), "status": status,
         "duration": duration, "exit": exit_code, "host": target_label, "log": log,

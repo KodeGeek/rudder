@@ -38,6 +38,14 @@ export function dur(sec: number | null | undefined): string {
   return s ? `${m}m ${s}s` : `${m}m`;
 }
 
+export function bytes(n: number | null | undefined): string {
+  if (n == null) return "—";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+}
+
 const DOW = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"];
 
 export function cronHuman(cron: string): string {

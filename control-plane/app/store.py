@@ -561,6 +561,18 @@ def add_run(name: str, run: dict):
         save_runs()
 
 
+def append_run_log(name: str, run_id: str, entry: dict):
+    """Append one classified log line to a running run and persist, so the UI's
+    poll of /jobs/{name} shows output live instead of all-at-once at the end."""
+    with _lock:
+        for r in runs.get(name, []):
+            if r["id"] == run_id:
+                r.setdefault("log", []).append(entry)
+                r["log"] = r["log"][-400:]
+                save_runs()
+                return
+
+
 def replace_run(name: str, run_id: str, run: dict):
     with _lock:
         lst = runs.setdefault(name, [])

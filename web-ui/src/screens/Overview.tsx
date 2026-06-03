@@ -3,9 +3,56 @@ import React from "react";
 import { Card, Btn, StatusDot, StatusPill, KindTag } from "../components/ui";
 import { Icons } from "../components/icons";
 import { EmptyState } from "../components/EmptyState";
-import { relTime, cronHuman } from "../lib/format";
+import { relTime, cronHuman, bytes } from "../lib/format";
 import { useData } from "../lib/data";
+import { api, type HostStats } from "../lib/api";
 import type { ConnectedRepo, Job, NavFn } from "../data/types";
+
+function ResBar({ label, pct, detail }: { label: string; pct: number; detail: string }) {
+  const c = pct >= 90 ? "var(--fail)" : pct >= 75 ? "var(--warn)" : "var(--ok)";
+  return (
+    <div style={{ padding: "11px 16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-2)" }}>{label}</span>
+        <span className="mono" style={{ fontSize: "var(--fs-sm)", color: c, fontWeight: 600 }}>{pct}%</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 99, background: "var(--surface-3)", overflow: "hidden" }}>
+        <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: c, borderRadius: 99, transition: "width .4s" }} />
+      </div>
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>{detail}</div>
+    </div>
+  );
+}
+
+function ServerResources() {
+  const [s, setS] = React.useState<HostStats | null>(null);
+  React.useEffect(() => {
+    let on = true;
+    const load = () => api.hostStats().then((d) => { if (on) setS(d); }).catch(() => {});
+    load();
+    const id = setInterval(load, 5000);
+    return () => { on = false; clearInterval(id); };
+  }, []);
+  return (
+    <Card pad={false}>
+      <div style={{ padding: "14px 16px 12px", display: "flex", alignItems: "center", gap: 9 }}>
+        <Icons.server size={15} style={{ color: "var(--text-3)" }} />
+        <span style={{ fontSize: "var(--fs-md)", fontWeight: 600 }}>Server resources</span>
+        <span style={{ flex: 1 }} />
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>host20</span>
+      </div>
+      <div style={{ borderTop: "1px solid var(--line-soft)", paddingBottom: 6 }}>
+        {!s ? <div style={{ padding: "16px", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>Loading…</div>
+          : s.error ? <div style={{ padding: "16px", fontSize: "var(--fs-sm)", color: "var(--warn)" }}>Unavailable: {s.error}</div>
+          : <>
+              <ResBar label="CPU" pct={s.cpu ?? 0} detail={`${s.cpu ?? 0}% busy`} />
+              <ResBar label="Memory" pct={s.mem?.pct ?? 0} detail={`${bytes(s.mem?.used)} / ${bytes(s.mem?.total)} used`} />
+              <ResBar label="Disk" pct={s.disk?.pct ?? 0} detail={`${bytes(s.disk?.used)} / ${bytes(s.disk?.total)} used`} />
+            </>}
+      </div>
+    </Card>
+  );
+}
 
 function Metric({ k, label, color, onClick }:
   { k: React.ReactNode; label: string; color: string; onClick?: () => void }) {
@@ -200,6 +247,7 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "var(--gap)" }}>
+          <ServerResources />
           <Card pad={false}>
             <div style={{ padding: "14px 16px 12px", display: "flex", alignItems: "center", gap: 9 }}>
               <Icons.refresh size={15} style={{ color: "var(--accent-text)" }} />

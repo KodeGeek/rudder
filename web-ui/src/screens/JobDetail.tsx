@@ -67,6 +67,12 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
   const rate = job.successRate ?? 0;
 
   const onRun = async () => { await runJob(name); setTimeout(load, 1500); };
+  const onStop = async () => {
+    const r = runs.find((x) => x.status === "running");
+    if (!r) return;
+    try { await api.stopRun(name, r.id); } catch { /* ignore */ }
+    setTimeout(load, 1000);
+  };
 
   return (
     <div style={{ maxWidth: 1320, margin: "0 auto", padding: "20px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
@@ -94,7 +100,9 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
         </div>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           <Btn kind="solid" icon={Icons.doc} onClick={() => nav("manifest")}>Manifest</Btn>
-          <Btn kind="primary" icon={Icons.play} disabled={isRunning} onClick={onRun}>{isRunning ? "Running…" : "Run now"}</Btn>
+          {isRunning
+            ? <Btn kind="solid" icon={Icons.x} onClick={onStop}>Stop</Btn>
+            : <Btn kind="primary" icon={Icons.play} onClick={onRun}>Run now</Btn>}
         </div>
       </div>
 
