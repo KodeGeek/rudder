@@ -67,6 +67,10 @@ def reconcile_all():
     store.reconcile_state["lastAt"] = now
     store.reconcile_state["nextAt"] = now + _interval_seconds(config.RECONCILE_INTERVAL) * 1000
     schedule_all()
+    try:
+        store.probe_inventory()  # refresh host up/down after a pull (also runs on its own interval)
+    except Exception as e:
+        print("main: inventory probe failed:", e)
 
 
 def _boot():
@@ -96,6 +100,8 @@ def _boot():
     reconcile_all()
     scheduler.add_job(reconcile_all, "interval", seconds=_interval_seconds(config.RECONCILE_INTERVAL),
                       id="reconcile", replace_existing=True)
+    scheduler.add_job(store.probe_inventory, "interval", seconds=60,
+                      id="reachability", replace_existing=True, max_instances=1, coalesce=True)
     _booted["ok"] = True
     print("main: control-plane booted")
 

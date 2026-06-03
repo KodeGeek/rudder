@@ -9,9 +9,11 @@ durable record lives in Prometheus + Loki).
 import json
 import os
 import re
+import socket
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import yaml
@@ -25,7 +27,8 @@ jobs: dict = {}             # name -> job (internal, with _repoId/_workdir)
 runs: dict = {}             # name -> [run]  (newest first)
 manifests: dict = {}        # id -> {"jobsYaml","rudderYaml","found","playbooks"}
 channels: list = []         # parsed from rudder.yml alerts across repos
-repo_inventory: dict = {}   # id -> {"groups":[], "hosts":[]}
+repo_inventory: dict = {}   # id -> {"groups":{g:[hosts]}, "hostmap":{host:group}, "hostinfo":{host:{addr,port}}}
+host_reach: dict = {}       # host name -> {"up": bool, "lastSeen": ms|None}  (live TCP reachability)
 
 reconcile_state = {
     "lastAt": None, "intervalMin": 2, "inSync": True, "pendingCommit": None, "nextAt": None,
@@ -400,26 +403,59 @@ def _parse_inventory(rid: str, wd: str):
     except Exception:
         repo_inventory.pop(rid, None)
         return
-    groups, hosts = (_parse_yaml_inventory(text) if path.endswith((".yml", ".yaml"))
-                     else _parse_ini_inventory(text))
-    if groups or hosts:
-        repo_inventory[rid] = {"groups": groups, "hosts": hosts}
+    groups_map, hostmap, hostinfo = (
+        _parse_yaml_inventory(text) if path.endswith((".yml", ".yaml"))
+        else _parse_ini_inventory(text))
+    if groups_map or hostmap:
+        repo_inventory[rid] = {
+            "groups": {g: sorted(hs) for g, hs in groups_map.items() if hs},
+            "hostmap": hostmap,
+            "hostinfo": hostinfo,
+        }
     else:
         repo_inventory.pop(rid, None)
 
 
-def _inv_lists(groups_map: dict, hostmap: dict):
-    glist = [{"name": g, "hosts": len(hs), "up": len(hs), "desc": "from repo inventory"}
-             for g, hs in groups_map.items() if hs]
+# ── host reachability (real up/down for the Inventory screen) ──
+def _probe_one(addr: str, port: int, timeout: float = 2.0) -> bool:
+    """A host is 'up' if we can open a TCP connection to its SSH/management port —
+    the signal that actually matters for an Ansible control node (ICMP is often
+    firewalled and needs extra privileges in a container)."""
+    try:
+        with socket.create_connection((addr, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def probe_inventory():
+    """Probe every inventory host in parallel and record live up/down. Runs after
+    each reconcile and on a short interval; results feed inventory_view()."""
+    targets = {}
+    for inv in repo_inventory.values():
+        for h, info in (inv.get("hostinfo") or {}).items():
+            targets.setdefault(h, (info.get("addr") or h, int(info.get("port") or 22)))
+    if not targets:
+        return
+    items = list(targets.items())
+
+    def work(item):
+        h, (addr, port) = item
+        return h, _probe_one(addr, port)
+
+    with ThreadPoolExecutor(max_workers=min(32, len(items))) as ex:
+        results = list(ex.map(work, items))
     now = int(time.time() * 1000)
-    hlist = [{"name": h, "group": g, "ip": "—", "os": "—", "up": True, "jobs": 0, "lastSeen": now}
-             for h, g in hostmap.items()]
-    return glist, hlist
+    with _lock:
+        for h, up in results:
+            prev = host_reach.get(h) or {}
+            host_reach[h] = {"up": up, "lastSeen": now if up else prev.get("lastSeen")}
 
 
 def _parse_ini_inventory(text: str):
     groups_map: dict = {}
     hostmap: dict = {}
+    hostinfo: dict = {}
     cur = None
     for raw in text.splitlines():
         line = raw.strip()
@@ -427,38 +463,64 @@ def _parse_ini_inventory(text: str):
             continue
         if line.startswith("[") and line.endswith("]"):
             name = line[1:-1].strip()
-            if ":" in name:  # [group:vars] / [group:children] — skip for host listing
-                cur = None
-            else:
-                cur = name
+            cur = None if ":" in name else name  # skip [group:vars]/[group:children]
+            if cur:
                 groups_map.setdefault(cur, set())
             continue
         if cur is None:
             continue
-        host = line.split()[0]
+        parts = line.split()
+        host = parts[0]
         if "[" in host:  # skip range patterns like web[01:10]
             continue
         groups_map[cur].add(host)
         hostmap.setdefault(host, cur)
-    return _inv_lists(groups_map, hostmap)
+        addr, port = host, 22
+        for tok in parts[1:]:
+            if tok.startswith("ansible_host="):
+                addr = tok.split("=", 1)[1]
+            elif tok.startswith("ansible_port="):
+                try:
+                    port = int(tok.split("=", 1)[1])
+                except ValueError:
+                    pass
+        hostinfo.setdefault(host, {"addr": addr, "port": port})
+    return groups_map, hostmap, hostinfo
 
 
 def _parse_yaml_inventory(text: str):
     try:
         data = yaml.safe_load(text) or {}
     except Exception:
-        return [], []
+        return {}, {}, {}
     groups_map: dict = {}
     hostmap: dict = {}
+    hostinfo: dict = {}
+    try:
+        default_port = int(((data.get("all") or {}).get("vars") or {}).get("ansible_port", 22))
+    except (ValueError, TypeError, AttributeError):
+        default_port = 22
 
     def walk(node, gname):
         if not isinstance(node, dict):
             return
         hs = node.get("hosts")
-        names = list(hs.keys()) if isinstance(hs, dict) else (hs if isinstance(hs, list) else [])
-        for h in names:
+        if isinstance(hs, dict):
+            items = list(hs.items())
+        elif isinstance(hs, list):
+            items = [(h, {}) for h in hs]
+        else:
+            items = []
+        for h, hv in items:
+            hv = hv if isinstance(hv, dict) else {}
             groups_map.setdefault(gname, set()).add(h)
             hostmap.setdefault(h, gname)
+            addr = str(hv.get("ansible_host") or hv.get("ansible_ssh_host") or h)
+            try:
+                port = int(hv.get("ansible_port", default_port))
+            except (ValueError, TypeError):
+                port = default_port
+            hostinfo.setdefault(h, {"addr": addr, "port": port})
         ch = node.get("children")
         if isinstance(ch, dict):
             for cg, cn in ch.items():
@@ -470,7 +532,7 @@ def _parse_yaml_inventory(text: str):
     else:
         for gname, node in data.items():
             walk(node, gname)
-    return _inv_lists(groups_map, hostmap)
+    return groups_map, hostmap, hostinfo
 
 
 # ── run history ──
@@ -535,13 +597,24 @@ def inventory_view() -> dict:
     groups, hosts = [], []
     seen_h = set()
     for inv in repo_inventory.values():
-        groups += inv["groups"]
-        for h in inv["hosts"]:
-            if h["name"] in seen_h:
+        gm = inv.get("groups") or {}
+        info = inv.get("hostinfo") or {}
+        for g, members in gm.items():
+            up = sum(1 for m in members if (host_reach.get(m) or {}).get("up"))
+            groups.append({"name": g, "hosts": len(members), "up": up, "desc": "from repo inventory"})
+        for h, g in (inv.get("hostmap") or {}).items():
+            if h in seen_h:
                 continue
-            seen_h.add(h["name"])
-            h = {**h, "jobs": sum(1 for j in jobs.values() if j.get("limit") in (h["group"], "all"))}
-            hosts.append(h)
+            seen_h.add(h)
+            r = host_reach.get(h) or {}
+            hosts.append({
+                "name": h, "group": g,
+                "ip": (info.get(h) or {}).get("addr") or "—",
+                "os": "—",
+                "up": bool(r.get("up", False)),
+                "jobs": sum(1 for j in jobs.values() if j.get("limit") in (g, "all")),
+                "lastSeen": r.get("lastSeen"),
+            })
     if groups or hosts:
         return {"groups": groups, "hosts": hosts}
     # fallback: derive from job targets + the bundled target
