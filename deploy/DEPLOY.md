@@ -165,6 +165,42 @@ its image exists (Phase 2).
 - The UI is fully self-contained — React, fonts, and all assets are bundled at
   build time, so the running container makes **zero external network calls**.
 
+## Surviving host reboots
+
+Rudder is built to come back cleanly after a host reboot — connected repos,
+schedules, and credentials all persist. State lives on **named Docker volumes**:
+
+| State | Volume | Survives reboot |
+|---|---|---|
+| Connected repos + cloned working dirs | `cp-work` | ✅ |
+| Secrets — SSH keys, vault passwords, tokens | `vault-data` (encrypted at rest) | ✅ |
+| Vault unseal key + root token | `vault-shared` | ✅ |
+| Bundled Git server data | `gitea-data` | ✅ |
+| Run history | — (in-memory) | ✗ — the durable copy is in Loki |
+
+For an **unattended** reboot to "just work", two host-level requirements:
+
+1. **Docker must start on boot.** Containers use `restart: unless-stopped`, so
+   they auto-restart once the daemon is up — but only if the daemon itself starts
+   on boot:
+   ```bash
+   sudo systemctl enable docker      # Linux / systemd
+   ```
+2. **Bring the stack up with `docker compose up -d`** (so the restart policy and
+   named volumes are in effect), and for maintenance use **`docker compose stop`**
+   / **`docker compose start`** — never `docker compose down -v`, which deletes
+   the volumes (and your secrets) on purpose.
+
+On restart the control-plane waits for Vault to auto-unseal, then reconciles; if
+it briefly comes up before Vault is ready, the reconcile loop heals it on its next
+pass (≤ the reconcile interval). Verify reboot-safety **without** rebooting:
+
+```bash
+docker compose --profile bundled --profile backend stop
+docker compose --profile bundled --profile backend start
+curl -s http://localhost:8080/api/control-plane/repos    # repo + schedule still there
+```
+
 ## Production hardening
 
 The compose/k8s manifests are reference deployments for self-hosting. Before
