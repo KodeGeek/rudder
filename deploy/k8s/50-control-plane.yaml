@@ -2,6 +2,16 @@
 # Pulls SSH keys/secrets from Vault, renders the Git manifest → cron, runs
 # Ansible, and pushes metrics + logs. Uses the hardened Vault's published root
 # token (VAULT_TOKEN_FILE on the shared PVC) — no dev-mode Secret.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cp-work               # repo registrations (repos.json) + cloned repos + run state
+  namespace: rudder
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests: { storage: 2Gi }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -44,12 +54,15 @@ spec:
             periodSeconds: 15
           volumeMounts:
             - { name: vault-shared, mountPath: /vault-shared, readOnly: true }
+            - { name: cp-work, mountPath: /app/work }
           resources:
             requests: { cpu: "50m", memory: "128Mi" }
             limits:   { cpu: "1", memory: "512Mi" }
       volumes:
         - name: vault-shared
           persistentVolumeClaim: { claimName: vault-shared }
+        - name: cp-work
+          persistentVolumeClaim: { claimName: cp-work }
 ---
 apiVersion: v1
 kind: Service
