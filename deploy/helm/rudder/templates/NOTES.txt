@@ -1,0 +1,76 @@
+
+Rudder {{ .Chart.AppVersion }} has been installed as release "{{ .Release.Name }}"
+in namespace "{{ .Release.Namespace }}".
+
+Components: web-ui · vault (OpenBao) · prometheus + pushgateway · loki · control-plane
+
+────────────────────────────────────────────────────────────────────────────
+Reach the web UI
+────────────────────────────────────────────────────────────────────────────
+{{- if .Values.webUi.ingress.enabled }}
+An Ingress is configured. Open:
+
+  http{{ if .Values.webUi.ingress.tls }}s{{ end }}://{{ .Values.webUi.ingress.host }}{{ .Values.webUi.ingress.path }}
+
+(Ensure DNS for "{{ .Values.webUi.ingress.host }}" points at your ingress controller.)
+{{- else if eq .Values.webUi.service.type "NodePort" }}
+The UI is exposed via NodePort {{ .Values.webUi.service.nodePort }}. Get a node IP and open:
+
+  export NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  echo "http://${NODE_IP}:{{ .Values.webUi.service.nodePort }}"
+
+(On docker-desktop / kind, http://localhost:{{ .Values.webUi.service.nodePort }} usually works.)
+{{- else if eq .Values.webUi.service.type "LoadBalancer" }}
+The UI is exposed via a LoadBalancer. Wait for the cloud to assign an external IP:
+
+  kubectl get svc web-ui -n {{ .Release.Namespace }} -w
+
+Then open  http://<EXTERNAL-IP>:{{ .Values.webUi.service.port }}
+{{- else }}
+The UI Service is ClusterIP (in-cluster only). Port-forward to reach it:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/web-ui 8080:{{ .Values.webUi.service.port }}
+  # then open http://localhost:8080
+
+For external access, enable the Ingress (webUi.ingress.enabled=true) or set
+webUi.service.type=LoadBalancer.
+{{- end }}
+
+────────────────────────────────────────────────────────────────────────────
+Control-plane API authentication
+────────────────────────────────────────────────────────────────────────────
+{{- if .Values.controlPlane.apiKey.existingSecret }}
+RUDDER_API_KEY is sourced from existing Secret "{{ .Values.controlPlane.apiKey.existingSecret }}"
+(key "{{ .Values.controlPlane.apiKey.existingSecretKey }}"). The API is authenticated. Good.
+{{- else if .Values.controlPlane.apiKey.value }}
+RUDDER_API_KEY is stored in the chart-managed Secret "{{ include "rudder.fullname" . }}-api-key".
+The API is authenticated. Retrieve the key with:
+
+  kubectl get secret {{ include "rudder.fullname" . }}-api-key -n {{ .Release.Namespace }} \
+    -o jsonpath='{.data.RUDDER_API_KEY}' | base64 -d; echo
+{{- else }}
+  ###########################################################################
+  #  WARNING: NO API KEY SET — THE CONTROL-PLANE API IS UNAUTHENTICATED.     #
+  #                                                                          #
+  #  Anyone who can reach the control-plane Service can drive Ansible runs   #
+  #  against your fleet. This is acceptable ONLY for local/dev clusters.     #
+  #                                                                          #
+  #  Set one before exposing Rudder beyond your laptop, e.g.:                #
+  #    helm upgrade {{ .Release.Name }} ... \                                       \
+  #      --set controlPlane.apiKey.value=$(openssl rand -hex 24)             #
+  #  ...or reference an existing Secret:                                     #
+  #    --set controlPlane.apiKey.existingSecret=rudder-api-key               #
+  ###########################################################################
+{{- end }}
+
+────────────────────────────────────────────────────────────────────────────
+Notes
+────────────────────────────────────────────────────────────────────────────
+- Storage class: {{ if .Values.persistence.storageClassName }}"{{ .Values.persistence.storageClassName }}"{{ else }}cluster default (storageClassName omitted){{ end }}.
+- Host stats (node CPU/mem/disk on Overview): {{ if .Values.controlPlane.hostStats.enabled }}ENABLED (hostPath /proc + / mounted — single-node only).{{ else }}disabled (app falls back to the pod's own /proc and /).{{ end }}
+- Vault root token is published to the vault-shared PVC by the unseal sidecar —
+  it is never stored in a Secret or in git.
+
+Check rollout:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}

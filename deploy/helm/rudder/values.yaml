@@ -1,0 +1,206 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Rudder Helm chart — default values
+#
+# Rudder installs as ONE release that bundles five components:
+#   web-ui · vault (OpenBao) · prometheus + pushgateway · loki · control-plane
+#
+# Install (any cluster):
+#   helm install rudder ./deploy/helm/rudder -n rudder --create-namespace
+#
+# Everything below is a knob. The defaults reproduce the behavior of the raw
+# kustomize manifests in deploy/k8s/, but with the single-node-k3s assumptions
+# (hardcoded namespace, NodePort, host /proc mounts, fixed storage class)
+# turned into portable options that work on AKS / EKS / GKE / OpenShift too.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Override the chart name / fullname used for resource naming (rarely needed).
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Images ───────────────────────────────────────────────────────────────────
+# Rudder's own images (web-ui, control-plane) are built from this repo and
+# pushed to a registry. Defaults point at the project's GHCR namespace.
+image:
+  # Registry + org prefix for Rudder's OWN images (web-ui, control-plane).
+  # The full ref is: {{ image.registry }}/{{ <comp>.image.repository }}:{{ tag }}
+  registry: ghcr.io/kodegeek
+  # Pull policy applied to every container in the chart.
+  # IfNotPresent lets docker-desktop / kind reuse a locally-loaded image.
+  pullPolicy: IfNotPresent
+
+# Optional: names of imagePullSecrets to attach to every pod (private registries).
+#   imagePullSecrets:
+#     - name: my-ghcr-creds
+imagePullSecrets: []
+
+# ── Persistence (storage) ────────────────────────────────────────────────────
+# storageClassName drives PORTABILITY:
+#   - Leave it EMPTY ("") to omit the field entirely → the cluster's DEFAULT
+#     StorageClass is used. This is what you want on AKS / EKS / GKE / OpenShift
+#     and on docker-desktop / kind / minikube.
+#   - Set it (e.g. "gp3", "managed-csi", "standard") to pin a specific class.
+persistence:
+  storageClassName: ""
+  # Per-volume sizes (defaults match the source manifests).
+  cpWork: 2Gi        # control-plane: repos.json + cloned repos + run state
+  vaultData: 1Gi     # vault (OpenBao) file storage — secrets encrypted at rest
+  vaultShared: 64Mi  # vault unseal key + root token (written by the sidecar)
+  prometheus: 5Gi    # prometheus TSDB
+  loki: 5Gi          # loki run-log chunks
+
+# ── web-ui ───────────────────────────────────────────────────────────────────
+# Stateless nginx that serves the dashboard and proxies to the in-cluster
+# services. Cross-service URLs are rendered with the RELEASE NAMESPACE, so the
+# chart works regardless of which namespace you install into.
+webUi:
+  replicaCount: 2   # stateless — scale freely
+  image:
+    repository: rudder-web-ui
+    # tag defaults to .Chart.AppVersion when left empty.
+    tag: ""
+    # Set to a full image ref to bypass image.registry/repository/tag entirely.
+    fullOverride: ""
+  # DATA_SOURCE for the UI. "live" binds it to the in-cluster services.
+  dataSource: live
+  service:
+    # How the UI is exposed:
+    #   NodePort     — default; reach it at http://<node-ip>:<nodePort> (k3s parity)
+    #   ClusterIP    — in-cluster only (front it with the Ingress below)
+    #   LoadBalancer — cloud external IP (AKS/EKS/GKE)
+    type: NodePort
+    port: 80
+    # Only emitted when service.type == NodePort.
+    nodePort: 30080
+  ingress:
+    # Render an Ingress only when enabled. Pairs well with service.type=ClusterIP.
+    enabled: false
+    className: ""
+    host: rudder.local
+    path: /
+    pathType: Prefix
+    annotations: {}
+    # TLS list, passed through verbatim to the Ingress spec. Example:
+    #   tls:
+    #     - hosts: [rudder.example.com]
+    #       secretName: rudder-tls
+    tls: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── vault (OpenBao) ──────────────────────────────────────────────────────────
+# HARDENED OpenBao: file storage (encrypted at rest, persisted), with an
+# auto-unseal sidecar that initializes Vault once, publishes the root token to
+# the shared PVC, and keeps it unsealed. No dev-mode, no committed token.
+# The init/unseal logic is preserved exactly from the source manifest.
+vault:
+  # External pinned image — kept at the EXACT digest from the source manifest.
+  # Override only if you must (e.g. an internal mirror).
+  image: openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  # Resources for the auto-unseal sidecar container.
+  unsealResources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# ── prometheus + pushgateway ─────────────────────────────────────────────────
+prometheus:
+  # External pinned image — EXACT digest from the source manifest.
+  image: prom/prometheus@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+pushgateway:
+  # External pinned image — EXACT digest from the source manifest.
+  image: prom/pushgateway@sha256:74fa117cef2d7e383112d25139ff1c2d2e309c35389a9e0554a47136a1482e48
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── loki ─────────────────────────────────────────────────────────────────────
+loki:
+  # External pinned image — EXACT digest from the source manifest.
+  image: grafana/loki@sha256:191d4fdfb7264f16989f0a57f320872620a5a7c2ceeec6229212c4190ec49b86
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+# ── control-plane ────────────────────────────────────────────────────────────
+# The reconcile loop + job runner + API. Pulls SSH keys/secrets from Vault
+# (via the published root token on the shared PVC), runs Ansible, and pushes
+# metrics + logs.
+controlPlane:
+  # Keep at 1: the pod shares an RWO PVC (cp-work) and the RWO vault-shared PVC,
+  # and uses strategy:Recreate. Running >1 replica requires the M5 datastore
+  # work (externalize state) — do NOT bump this without it.
+  replicaCount: 1
+  image:
+    repository: rudder-control-plane
+    # tag defaults to .Chart.AppVersion when left empty.
+    tag: ""
+    fullOverride: ""
+
+  # How often the reconcile loop renders Git manifests → cron and runs Ansible.
+  reconcileInterval: "15m"
+  # Concurrent playbook runs (bounds the worker thread pool).
+  runWorkers: 4
+  # SSH host-key policy: false → "accept-new" (trust on first contact);
+  # true → "yes" (strict — hosts must be pre-populated in known_hosts).
+  sshStrict: false
+
+  # ── API authentication ─────────────────────────────────────────────────────
+  # A single API key is the v1 auth (RUDDER_API_KEY). Precedence:
+  #   1. existingSecret — reference RUDDER_API_KEY from an existing Secret.
+  #   2. value          — chart creates a Secret ({{ fullname }}-api-key) for you.
+  #   3. neither        — env omitted → the API runs UNAUTHENTICATED (open mode).
+  apiKey:
+    value: ""
+    # Name of a pre-existing Secret holding the key (takes precedence over value).
+    existingSecret: ""
+    # Key within that Secret. Defaults to RUDDER_API_KEY.
+    existingSecretKey: RUDDER_API_KEY
+
+  # ── host stats ──────────────────────────────────────────────────────────────
+  # When enabled, mounts the node's /proc and / (read-only) so /host-stats can
+  # report node CPU/memory/disk on the Overview dashboard.
+  # DISABLED by default: hostPath only makes sense on single-node clusters and
+  # raises security concerns (and may be blocked by PodSecurity / SCC) on managed
+  # clusters. When disabled the app falls back gracefully to the pod's own
+  # /proc and /.
+  hostStats:
+    enabled: false
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
