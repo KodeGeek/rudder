@@ -11,11 +11,14 @@ metadata:
   namespace: rudder
 data:
   # Live: bind the UI to the in-cluster control-plane / Prometheus / Loki / Vault.
+  # NOTE: use FQDNs — the nginx proxy resolves upstreams lazily via the cluster
+  # resolver, which does NOT apply Kubernetes search domains, so bare service
+  # names (e.g. "control-plane") fail to resolve. *.<ns>.svc.cluster.local works.
   DATA_SOURCE: "live"
-  PROMETHEUS_URL: "http://prometheus:9090"
-  LOKI_URL: "http://loki:3100"
-  VAULT_URL: "http://vault:8200"
-  CONTROL_PLANE_URL: "http://control-plane:8090"
+  PROMETHEUS_URL: "http://prometheus.rudder.svc.cluster.local:9090"
+  LOKI_URL: "http://loki.rudder.svc.cluster.local:3100"
+  VAULT_URL: "http://vault.rudder.svc.cluster.local:8200"
+  CONTROL_PLANE_URL: "http://control-plane.rudder.svc.cluster.local:8090"
 ---
 apiVersion: apps/v1
 kind: Deployment
