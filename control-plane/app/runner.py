@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from . import config, store, telemetry, vault
 
@@ -230,5 +231,49 @@ def run_job(name: str, manual: bool = False):
     return status
 
 
+class QueueFull(Exception):
+    """Raised when too many runs are already in flight (→ HTTP 429)."""
+
+
+class AlreadyRunning(Exception):
+    """Raised when a run for this job is already queued/running (→ HTTP 409)."""
+
+
+# Bounded pool replaces unbounded daemon threads: a network-reachable /run
+# endpoint could otherwise spawn threads (each a full Ansible-over-SSH process)
+# without limit and OOM the pod. RUN_WORKERS bounds concurrency; RUN_QUEUE_MAX
+# bounds total in-flight; single-flight per job prevents overlapping runs.
+_pool = ThreadPoolExecutor(max_workers=config.RUN_WORKERS)
+_inflight: dict = {}                 # name -> Future (queued or running)
+_inflight_lock = threading.Lock()
+
+
 def run_async(name: str, manual: bool = True):
-    threading.Thread(target=run_job, args=(name,), kwargs={"manual": manual}, daemon=True).start()
+    with _inflight_lock:
+        cur = _inflight.get(name)
+        if cur is not None and not cur.done():
+            raise AlreadyRunning(name)
+        active = sum(1 for f in _inflight.values() if not f.done())
+        if active >= config.RUN_QUEUE_MAX:
+            raise QueueFull()
+        fut = _pool.submit(run_job, name, manual)
+        _inflight[name] = fut
+
+    def _cleanup(f, n=name):
+        with _inflight_lock:
+            if _inflight.get(n) is f:
+                _inflight.pop(n, None)
+
+    fut.add_done_callback(_cleanup)
+    return fut
+
+
+def submit_scheduled(name: str):
+    """Scheduler entrypoint: go through the same pool, but skip (don't raise) if
+    the job is already running or the queue is saturated."""
+    try:
+        run_async(name, manual=False)
+    except AlreadyRunning:
+        print(f"runner: scheduled run of {name} skipped — already running")
+    except QueueFull:
+        print(f"runner: scheduled run of {name} skipped — run queue full")

@@ -33,6 +33,10 @@ TARGET_HOST = env("TARGET_HOST", "target")
 TARGET_USER = env("TARGET_USER", "rudder")
 TARGET_PORT = env("TARGET_PORT", "22")
 
+# ── Run execution (bounded worker pool + backpressure) ──
+RUN_WORKERS = int(env("RUN_WORKERS", "4"))        # concurrent playbook runs
+RUN_QUEUE_MAX = int(env("RUN_QUEUE_MAX", "20"))   # total in-flight (running+queued) before 429
+
 # ── Reconcile + state ──
 RECONCILE_INTERVAL = env("RECONCILE_INTERVAL", "2m")
 WORKDIR = env("WORKDIR", "/app/work")

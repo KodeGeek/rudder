@@ -49,7 +49,7 @@ def schedule_all():
     for name, j in store.jobs.items():
         try:
             scheduler.add_job(
-                runner.run_job, CronTrigger.from_crontab(j["cron"]), args=[name],
+                runner.submit_scheduled, CronTrigger.from_crontab(j["cron"]), args=[name],
                 id=f"job:{name}", replace_existing=True,
                 misfire_grace_time=60, coalesce=True, max_instances=1,
             )
@@ -237,7 +237,12 @@ def get_job(name: str):
 def run_now(name: str):
     if name not in store.jobs:
         raise HTTPException(status_code=404, detail="job not found")
-    runner.run_async(name)
+    try:
+        runner.run_async(name)
+    except runner.AlreadyRunning:
+        raise HTTPException(status_code=409, detail="a run for this job is already in progress")
+    except runner.QueueFull:
+        raise HTTPException(status_code=429, detail="run queue full — try again shortly")
     return {"started": True}
 
 
