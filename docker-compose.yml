@@ -58,7 +58,7 @@ services:
   # No token is committed — the root token is generated at init and kept on a
   # private volume. For production, run a real sealed Vault instead (SECURITY.md).
   vault:
-    image: openbao/openbao:latest
+    image: openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
     container_name: rudder-vault
     command: server -config=/openbao/config/config.hcl
     volumes:
@@ -79,7 +79,7 @@ services:
   # volume) and keeps it unsealed across restarts, so the stack self-recovers
   # with no manual step. Drop this service to switch to manual unseal.
   vault-unseal:
-    image: openbao/openbao:latest
+    image: openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
     container_name: rudder-vault-unseal
     depends_on:
       vault:
@@ -181,7 +181,7 @@ services:
 
   # ── Metrics store ────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
     container_name: rudder-prometheus
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -197,7 +197,7 @@ services:
 
   # ── Pushgateway: short-lived cron jobs push metrics here ─────────
   pushgateway:
-    image: prom/pushgateway:latest
+    image: prom/pushgateway@sha256:74fa117cef2d7e383112d25139ff1c2d2e309c35389a9e0554a47136a1482e48
     container_name: rudder-pushgateway
     networks: [rudder]
     restart: unless-stopped
@@ -205,7 +205,7 @@ services:
 
   # ── Log store for run-log drill-down ─────────────────────────────
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki@sha256:191d4fdfb7264f16989f0a57f320872620a5a7c2ceeec6229212c4190ec49b86
     container_name: rudder-loki
     command: -config.file=/etc/loki/local-config.yaml
     volumes:

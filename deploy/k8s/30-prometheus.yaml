@@ -44,7 +44,7 @@ spec:
     spec:
       containers:
         - name: prometheus
-          image: prom/prometheus:latest
+          image: prom/prometheus@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
@@ -97,7 +97,7 @@ spec:
     spec:
       containers:
         - name: pushgateway
-          image: prom/pushgateway:latest
+          image: prom/pushgateway@sha256:74fa117cef2d7e383112d25139ff1c2d2e309c35389a9e0554a47136a1482e48
           ports:
             - containerPort: 9091
           readinessProbe:

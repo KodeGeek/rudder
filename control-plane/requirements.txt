@@ -1,10 +1,12 @@
-fastapi
-uvicorn[standard]
-apscheduler
-hvac
-PyYAML
-requests
-prometheus-client
+# Pinned to the versions verified running in the deployed control-plane image.
+# Bump deliberately (CI rebuilds + tests on change); see docs for the upgrade flow.
+fastapi==0.136.3
+uvicorn[standard]==0.48.0
+apscheduler==3.11.2
+hvac==2.4.0
+PyYAML==6.0.3
+requests==2.34.2
+prometheus-client==0.25.0
 # full ansible community distribution — bundles community.docker, community.general,
 # ansible.posix, etc. so common playbooks resolve without a repo requirements.yml
-ansible
+ansible==14.0.0
