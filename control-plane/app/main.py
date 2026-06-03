@@ -4,13 +4,14 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import config, gitea, host, runner, store, vault
+from . import auth, config, gitea, host, runner, store, vault
 
-app = FastAPI(title="Rudder control-plane")
+# Auth guards every route; probe/schema paths are excluded inside require_auth.
+app = FastAPI(title="Rudder control-plane", dependencies=[Depends(auth.require_auth)])
 scheduler = BackgroundScheduler(timezone="UTC")
 _booted = {"ok": False}
 
@@ -116,6 +117,17 @@ def startup():
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "booted": _booted["ok"]}
+
+
+@app.get("/readyz")
+def readyz():
+    ready = _booted["ok"] and scheduler.running
+    return JSONResponse({"ready": ready}, status_code=200 if ready else 503)
+
+
+@app.get("/auth/verify")
+def auth_verify(principal: auth.Principal = Depends(auth.require_auth)):
+    return {"ok": True, "role": principal.role, "authRequired": bool(config.API_KEY)}
 
 
 @app.get("/info")

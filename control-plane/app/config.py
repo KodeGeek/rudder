@@ -6,6 +6,12 @@ def env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+# ── API auth ──
+# Shared API key guarding all endpoints. When unset, the API is open (localhost /
+# community fallback) — set this (from a Secret) for any non-localhost exposure.
+# Real SSO/OIDC is delegated to an authenticating reverse proxy in front of Rudder.
+API_KEY = env("RUDDER_API_KEY", "")
+
 # ── Vault (OpenBao) ──
 VAULT_ADDR = env("VAULT_ADDR", "http://vault:8200")
 VAULT_TOKEN = env("VAULT_TOKEN", "")
