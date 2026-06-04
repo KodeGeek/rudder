@@ -118,6 +118,17 @@ def startup():
     threading.Thread(target=_boot, daemon=True).start()
 
 
+@app.on_event("shutdown")
+def shutdown():
+    # SIGTERM → stop scheduling new runs and terminate in-flight ones cleanly.
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+    except Exception as e:
+        print("main: scheduler shutdown error:", e)
+    runner.shutdown()
+
+
 # ── API ──
 @app.get("/healthz")
 def healthz():

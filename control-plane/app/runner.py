@@ -292,6 +292,20 @@ def active_count() -> int:
         return sum(1 for f in _inflight.values() if not f.done())
 
 
+def shutdown():
+    """Graceful stop: signal in-flight runs to terminate and stop the pool so a
+    pod SIGTERM doesn't orphan ansible-playbook children or corrupt run state."""
+    for run_id in list(_running.keys()):
+        try:
+            stop_run(run_id)
+        except Exception:
+            pass
+    try:
+        _pool.shutdown(wait=False, cancel_futures=True)
+    except TypeError:                          # cancel_futures added in 3.9
+        _pool.shutdown(wait=False)
+
+
 def submit_scheduled(name: str):
     """Scheduler entrypoint: go through the same pool, but skip (don't raise) if
     the job is already running or the queue is saturated."""

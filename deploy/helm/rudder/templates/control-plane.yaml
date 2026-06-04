@@ -60,12 +60,16 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      terminationGracePeriodSeconds: 40    # let in-flight runs drain on SIGTERM
       containers:
         - name: control-plane
           image: {{ include "rudder.image" (dict "root" $ "component" .Values.controlPlane) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: 8090
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "3"] }
           env:
             - name: VAULT_ADDR
               value: "http://vault:8200"
@@ -98,10 +102,17 @@ spec:
                   name: {{ include "rudder.fullname" . }}-api-key
                   key: RUDDER_API_KEY
             {{- end }}
+          startupProbe:                          # allow slow first boot (Vault unseal)
+            httpGet: { path: /readyz, port: 8090 }
+            periodSeconds: 5
+            failureThreshold: 36
           readinessProbe:
-            httpGet: { path: /healthz, port: 8090 }
-            initialDelaySeconds: 5
+            httpGet: { path: /readyz, port: 8090 }
             periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8090 }
+            periodSeconds: 20
+            failureThreshold: 3
           volumeMounts:
             - { name: vault-shared, mountPath: /vault-shared, readOnly: true }
             - { name: cp-work, mountPath: /app/work }
