@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import auth, config, gitea, host, runner, store, vault
+from . import auth, config, gitea, host, metrics, runner, store, vault
 
 # Auth guards every route; probe/schema paths are excluded inside require_auth.
 app = FastAPI(title="Rudder control-plane", dependencies=[Depends(auth.require_auth)])
@@ -60,10 +60,13 @@ def schedule_all():
 
 
 def reconcile_all():
+    started = time.time()
+    ok = True
     for rid in list(store.repos.keys()):
         try:
             store.reconcile_repo(rid)
         except Exception as e:
+            ok = False
             print(f"main: reconcile failed for {rid}: {e}")
     now = int(time.time() * 1000)
     store.reconcile_state["lastAt"] = now
@@ -73,6 +76,7 @@ def reconcile_all():
         store.probe_inventory()  # refresh host up/down after a pull (also runs on its own interval)
     except Exception as e:
         print("main: inventory probe failed:", e)
+    metrics.record_reconcile(ok, time.time() - started)
 
 
 def _boot():
@@ -124,6 +128,17 @@ def healthz():
 def readyz():
     ready = _booted["ok"] and scheduler.running
     return JSONResponse({"ready": ready}, status_code=200 if ready else 503)
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    metrics.scheduler_running.set(1 if scheduler.running else 0)
+    metrics.jobs_total.set(len(store.jobs))
+    metrics.repos_total.set(len(store.repos))
+    metrics.runs_active.set(runner.active_count())
+    metrics.vault_up.set(1 if vault.is_up() else 0)
+    data, ctype = metrics.render()
+    return Response(content=data, media_type=ctype)
 
 
 @app.get("/auth/verify")

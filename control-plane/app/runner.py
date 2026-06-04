@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import config, store, telemetry, vault
+from . import config, metrics, store, telemetry, vault
 
 
 # Live processes, keyed by run_id, so the UI can stop a run mid-flight.
@@ -242,6 +242,7 @@ def run_job(name: str, manual: bool = False):
     })
     telemetry.push_metrics(name, status == "success", exit_code, duration)
     telemetry.push_logs(name, status, out)
+    metrics.record_run(status, duration)
     return status
 
 
@@ -280,6 +281,12 @@ def run_async(name: str, manual: bool = True):
 
     fut.add_done_callback(_cleanup)
     return fut
+
+
+def active_count() -> int:
+    """Runs currently queued or executing (for /metrics + /readyz)."""
+    with _inflight_lock:
+        return sum(1 for f in _inflight.values() if not f.done())
 
 
 def submit_scheduled(name: str):

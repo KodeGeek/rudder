@@ -56,6 +56,15 @@ def wait_ready(timeout: int = 90) -> bool:
     return False
 
 
+def is_up() -> bool:
+    """Cheap reachability/unseal check for /metrics and /readyz."""
+    try:
+        c = client()
+        return bool(c.sys.is_initialized()) and not c.sys.is_sealed()
+    except Exception:
+        return False
+
+
 def _kv_read(path: str):
     try:
         r = client().secrets.kv.v2.read_secret_version(

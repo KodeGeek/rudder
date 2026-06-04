@@ -16,7 +16,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from . import config
 
 # Probes + API schema stay reachable without a key.
-OPEN_PATHS = {"/healthz", "/readyz", "/docs", "/redoc", "/openapi.json"}
+OPEN_PATHS = {"/healthz", "/readyz", "/metrics", "/docs", "/redoc", "/openapi.json"}
 _warned = {"done": False}
 _bearer = HTTPBearer(auto_error=False)
 
