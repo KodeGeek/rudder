@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS run_logs (
   text   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_run_logs_run ON run_logs(run_id, id);
+CREATE TABLE IF NOT EXISTS audit (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,   -- append-only
+  at        INTEGER NOT NULL,
+  principal TEXT,
+  role      TEXT,
+  action    TEXT NOT NULL,
+  target    TEXT,
+  source_ip TEXT,
+  detail    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC);
 """
 
 RUNS_PER_JOB = 50
@@ -165,6 +176,22 @@ def delete_job_runs(job):
 def run_count():
     with _clock:
         return conn().execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"]
+
+
+def audit_insert(at, principal, role, action, target, source_ip, detail):
+    with _clock:
+        c = conn()
+        c.execute("INSERT INTO audit(at, principal, role, action, target, source_ip, detail)"
+                  " VALUES(?,?,?,?,?,?,?)", (at, principal, role, action, target, source_ip, detail))
+        c.commit()
+
+
+def audit_recent(limit=200):
+    with _clock:
+        rows = conn().execute(
+            "SELECT at, principal, role, action, target, source_ip, detail"
+            " FROM audit ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 def all_runs():

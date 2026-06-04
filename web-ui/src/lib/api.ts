@@ -58,6 +58,10 @@ export interface ManifestDoc {
 }
 export interface NewRepo { provider: string; url: string; branch: string; token?: string; authMethod?: string; vaultPass?: string }
 export interface DeployKey { rid: string; publicKey: string; sshUrl: string }
+export interface AuditEntry {
+  at: number; principal: string; role: string; action: string;
+  target: string; source_ip: string; detail: string;
+}
 export interface ResourceUse { used: number; total: number; pct: number }
 export interface HostStats { cpu?: number; mem?: ResourceUse; disk?: ResourceUse; source?: string; error?: string }
 
@@ -80,6 +84,7 @@ export const api = {
   stopRun: (name: string, runId: string) =>
     send<{ stopped: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/runs/" + encodeURIComponent(runId) + "/stop"),
   hostStats: () => get<HostStats>("/host-stats"),
+  audit: () => get<AuditEntry[]>("/audit"),
   reconcile: () => get<Reconcile>("/reconcile"),
   reconcileNow: () => send<Reconcile>("POST", "/reconcile"),
   activity: () => get<ActivityItem[]>("/activity"),

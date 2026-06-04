@@ -5,11 +5,11 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import alerts, auth, config, gitea, host, log, metrics, runner, store, vault
+from . import alerts, audit, auth, config, gitea, host, log, metrics, runner, store, vault
 
 # Auth guards every route; probe/schema paths are excluded inside require_auth.
 app = FastAPI(title="Rudder control-plane", dependencies=[Depends(auth.require_auth)])
@@ -187,8 +187,10 @@ class RepoIn(BaseModel):
 
 
 @app.post("/repos")
-def add_repo(body: RepoIn, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+def add_repo(body: RepoIn, request: Request,
+             principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     rec = store.add_repo(body.provider, body.url, body.branch, body.token, body.authMethod, body.vaultPass)
+    audit.record(principal, "repo.add", body.url, request)
     try:
         store.reconcile_repo(rec["id"])
         schedule_all()
@@ -206,12 +208,15 @@ class CredsIn(BaseModel):
 
 
 @app.post("/repos/credentials")
-def set_credentials(body: CredsIn, principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
+def set_credentials(body: CredsIn, request: Request,
+                    principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
     """Write-only: store run/decrypt secrets in Vault. NEVER returns secret
     values — only boolean 'configured' flags. Submitting a value overwrites it."""
     r = store.repos.get(body.rid)
     if not r:
         raise HTTPException(status_code=404, detail="repo not found")
+    set_fields = [k for k in ("hostKey", "vaultPass", "token") if getattr(body, k)]
+    audit.record(principal, "repo.credentials", body.rid, request, detail="set:" + ",".join(set_fields))
     if body.hostKey:
         vault.set_repo_host_key(body.rid, body.hostKey)
         r["hostKey"] = True
@@ -236,17 +241,21 @@ class DeployKeyIn(BaseModel):
 
 
 @app.post("/deploy-key")
-def deploy_key(body: DeployKeyIn, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+def deploy_key(body: DeployKeyIn, request: Request,
+               principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     """Generate (if needed) a per-repo deploy keypair; return the PUBLIC key for
     the operator to add to the repo's deploy keys on the provider side."""
     rid = f"{body.provider}:{store._slug(body.url)}"
     pub = vault.ensure_repo_deploy_key(rid)
+    audit.record(principal, "repo.deploy-key", rid, request)
     return {"rid": rid, "publicKey": pub, "sshUrl": store._ssh_url(body.url)}
 
 
 @app.delete("/repos/{rid:path}")
-def delete_repo(rid: str, principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
+def delete_repo(rid: str, request: Request,
+                principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
     store.remove_repo(rid)
+    audit.record(principal, "repo.remove", rid, request)
     schedule_all()
     return Response(status_code=204)
 
@@ -257,7 +266,9 @@ def get_reconcile():
 
 
 @app.post("/reconcile")
-def post_reconcile(principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+def post_reconcile(request: Request,
+                   principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+    audit.record(principal, "reconcile", "", request)
     reconcile_all()
     return store.reconcile_state
 
@@ -275,7 +286,8 @@ def get_job(name: str):
 
 
 @app.post("/jobs/{name}/run")
-def run_now(name: str, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+def run_now(name: str, request: Request,
+            principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     if name not in store.jobs:
         raise HTTPException(status_code=404, detail="job not found")
     try:
@@ -284,13 +296,16 @@ def run_now(name: str, principal: auth.Principal = Depends(auth.require_role(*au
         raise HTTPException(status_code=409, detail="a run for this job is already in progress")
     except runner.QueueFull:
         raise HTTPException(status_code=429, detail="run queue full — try again shortly")
+    audit.record(principal, "job.run", name, request)
     return {"started": True}
 
 
 @app.post("/jobs/{name}/runs/{run_id}/stop")
-def stop_run(name: str, run_id: str, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+def stop_run(name: str, run_id: str, request: Request,
+             principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     if name not in store.jobs:
         raise HTTPException(status_code=404, detail="job not found")
+    audit.record(principal, "job.stop", name, request, detail=run_id)
     return {"stopped": runner.stop_run(run_id)}
 
 
@@ -341,12 +356,19 @@ class ChannelTest(BaseModel):
 
 
 @app.post("/channels/test")
-def test_channel(body: ChannelTest, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+def test_channel(body: ChannelTest, request: Request,
+                 principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
+    audit.record(principal, "channel.test", body.target, request)
     try:
         ok = alerts.test_channel({"type": body.type, "target": body.target, "label": body.target})
         return {"sent": ok}
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"test failed: {e}")
+
+
+@app.get("/audit")
+def get_audit(principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
+    return audit.recent()
 
 
 @app.get("/secrets")
