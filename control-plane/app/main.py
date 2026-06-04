@@ -1,4 +1,5 @@
 """Rudder control-plane — FastAPI app, scheduler, and reconcile orchestration."""
+import os
 import threading
 import time
 
@@ -263,6 +264,22 @@ def stop_run(name: str, run_id: str):
     if name not in store.jobs:
         raise HTTPException(status_code=404, detail="job not found")
     return {"stopped": runner.stop_run(run_id)}
+
+
+@app.get("/jobs/{name}/playbook")
+def get_playbook(name: str):
+    j = store.jobs.get(name)
+    if not j:
+        raise HTTPException(status_code=404, detail="job not found")
+    path = runner._resolve_playbook(j)
+    rel = j.get("playbook", "")
+    try:
+        if path:
+            rel = os.path.relpath(path, j.get("_workdir") or os.path.dirname(path))
+        with open(path) as f:
+            return {"path": rel, "content": f.read(262144), "found": True}  # cap 256 KiB
+    except Exception:
+        return {"path": rel, "content": "", "found": False}
 
 
 @app.get("/host-stats")

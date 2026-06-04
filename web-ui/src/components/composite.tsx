@@ -72,6 +72,43 @@ export function LogViewer({ run, job, height = 340, dense }:
   );
 }
 
+/* ============ PLAYBOOK VIEWER (the YAML the job runs) ============ */
+export function PlaybookViewer({ path, content, found, loading, height = 340 }:
+  { path: string; content: string; found: boolean; loading: boolean; height?: number }) {
+  const [copied, setCopied] = React.useState(false);
+  const lines = content ? content.replace(/\n$/, "").split("\n") : [];
+  const copy = () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(content).catch(() => {});
+    setCopied(true); setTimeout(() => setCopied(false), 1400);
+  };
+  return (
+    <div style={{ background: "var(--term-bg)", borderRadius: "var(--r-md)", border: "1px solid var(--line)", overflow: "hidden",
+      display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px 8px 12px", borderBottom: "1px solid var(--line)", background: "var(--surface)" }}>
+        <Icons.doc size={15} style={{ color: "var(--text-3)" }} />
+        <span className="mono" style={{ fontSize: 11.5, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{path || "playbook"}</span>
+        <span style={{ flex: 1 }} />
+        {content && (
+          <button onClick={copy} title="Copy playbook"
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: copied ? "var(--ok)" : "var(--text-3)", background: "none", border: "none" }}>
+            {copied ? <Icons.check size={13} /> : <Icons.copy size={13} />}{copied ? "copied" : "copy"}
+          </button>
+        )}
+      </div>
+      <div style={{ height, overflow: "auto", padding: "10px 0", fontFamily: "var(--font-mono)", fontSize: 12.5, lineHeight: 1.65 }}>
+        {loading && <div style={{ color: "var(--text-faint)", padding: "20px 16px", fontSize: 12 }}>Loading playbook…</div>}
+        {!loading && !found && <div style={{ color: "var(--text-faint)", padding: "20px 16px", fontSize: 12 }}>Playbook not found in the repo (it may live elsewhere or the repo isn’t cloned yet).</div>}
+        {!loading && found && lines.map((l, i) => (
+          <div key={i} style={{ display: "flex", gap: 14, padding: "0 14px", whiteSpace: "pre" }}>
+            <span style={{ color: "var(--text-faint)", textAlign: "right", width: 34, flexShrink: 0, userSelect: "none" }}>{i + 1}</span>
+            <span style={{ color: "var(--text-2)" }}>{l || " "}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ============ RUN TIMELINE (history, §4.2) ============ */
 export function RunTimeline({ runs, selected, onSelect }:
   { runs: Run[]; selected?: string; onSelect: (id: string) => void }) {
