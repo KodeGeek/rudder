@@ -76,13 +76,13 @@ editing manifests. Parameterized storage class, service type (NodePort /
 LoadBalancer / Ingress / Gateway API), optional host-stats; cloud value overlays;
 `helm test` smoke check; copy-paste install per target.
 
-### M3 — Operability & observability
+### M3 — Operability & observability *(done)*
 Native `/metrics` for the control-plane itself, liveness/readiness split,
 structured logging with trace IDs, a notification dispatcher
 (Slack/Teams/email/webhook with per-job routing), Prometheus alert rules, and
 graceful shutdown/drain.
 
-### M4 — Governance: RBAC, audit & compliance
+### M4 — Governance: RBAC, audit & compliance *(done)*
 Promote the shared key into roles (admin/operator/viewer), an append-only audit
 log with run attribution, real secret rotation, a scoped (non-root) Vault token,
 non-root containers + NetworkPolicy + Pod Security Standards, and a
