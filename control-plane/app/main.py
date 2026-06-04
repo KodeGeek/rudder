@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import alerts, auth, config, gitea, host, metrics, runner, store, vault
+from . import alerts, auth, config, gitea, host, log, metrics, runner, store, vault
 
 # Auth guards every route; probe/schema paths are excluded inside require_auth.
 app = FastAPI(title="Rudder control-plane", dependencies=[Depends(auth.require_auth)])
@@ -76,7 +76,9 @@ def reconcile_all():
         store.probe_inventory()  # refresh host up/down after a pull (also runs on its own interval)
     except Exception as e:
         print("main: inventory probe failed:", e)
-    metrics.record_reconcile(ok, time.time() - started)
+    dur = time.time() - started
+    metrics.record_reconcile(ok, dur)
+    log.info("reconcile complete", ok=ok, duration=round(dur, 2), repos=len(store.repos), jobs=len(store.jobs))
 
 
 def _boot():

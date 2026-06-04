@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import alerts, config, metrics, store, telemetry, vault
+from . import alerts, config, log, metrics, store, telemetry, vault
 
 
 # Live processes, keyed by run_id, so the UI can stop a run mid-flight.
@@ -121,6 +121,7 @@ def run_job(name: str, manual: bool = False):
 
     prev_status = (store.runs.get(name) or [{}])[0].get("status")   # for recovery detection
     run_id = f"{name}-{int(time.time() * 1000)}"
+    log.info("run started", run_id=run_id, job=name, manual=manual, host=target_label)
     store.add_run(name, {
         "id": run_id, "at": int(time.time() * 1000), "status": "running",
         "duration": None, "exit": None, "host": target_label, "streaming": True,
@@ -244,6 +245,7 @@ def run_job(name: str, manual: bool = False):
     telemetry.push_metrics(name, status == "success", exit_code, duration)
     telemetry.push_logs(name, status, out)
     metrics.record_run(status, duration)
+    log.info("run finished", run_id=run_id, job=name, status=status, exit=exit_code, duration=duration)
     alerts.dispatch(name, status, prev_status, {"exit": exit_code, "host": target_label,
                                                 "at": int(time.time() * 1000)})
     return status
