@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
-from . import auth, config, gitea, host, metrics, runner, store, vault
+from . import alerts, auth, config, gitea, host, metrics, runner, store, vault
 
 # Auth guards every route; probe/schema paths are excluded inside require_auth.
 app = FastAPI(title="Rudder control-plane", dependencies=[Depends(auth.require_auth)])
@@ -320,6 +320,20 @@ def get_manifest():
 @app.get("/channels")
 def get_channels():
     return store.channels_view()
+
+
+class ChannelTest(BaseModel):
+    type: str = "webhook"
+    target: str = ""
+
+
+@app.post("/channels/test")
+def test_channel(body: ChannelTest):
+    try:
+        ok = alerts.test_channel({"type": body.type, "target": body.target, "label": body.target})
+        return {"sent": ok}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"test failed: {e}")
 
 
 @app.get("/secrets")

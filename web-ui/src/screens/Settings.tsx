@@ -75,7 +75,15 @@ function SourceRow({ icon: I, name, src, last }: { icon: IconFn; name: React.Rea
 const SECRET_KIND: Record<string, string> = { "ssh-key": "SSH key", token: "Token", "app-creds": "App creds", key: "Key" };
 
 export function SettingsScreen({ nav }: { nav: NavFn }) {
-  const { repos, secrets, channels, reconcile, removeRepo } = useData();
+  const { repos, secrets, channels, reconcile, removeRepo, flash } = useData();
+  const testChannel = async (type: string, target: string) => {
+    try {
+      const r = await api.testChannel(type, target);
+      flash(r.sent ? "Test notification sent" : "Channel has no usable target", r.sent ? "ok" : "fail");
+    } catch {
+      flash("Test notification failed", "fail");
+    }
+  };
   const cfg = getConfig();
   const live = cfg.dataSource === "live";
   const vaultSrc: ReachSrc = { ...cfg.vault, live };
@@ -183,6 +191,7 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
                 <div style={{ fontSize: "var(--fs-sm)", color: "var(--text)", fontWeight: 550 }}>{c.label}</div>
                 <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>{c.type} · on {c.on.join(", ") || "—"}</div>
               </div>
+              <Btn kind="bare" size="sm" icon={Icons.bell} onClick={() => testChannel(c.type, c.target)}>Test</Btn>
               <StatusPill s={c.enabled ? "ok" : "never"} size="sm">{c.enabled ? "On" : "Off"}</StatusPill>
             </SettingsRow>
           );

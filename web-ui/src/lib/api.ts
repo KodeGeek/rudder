@@ -72,6 +72,8 @@ export const api = {
   jobs: () => get<Job[]>("/jobs"),
   job: (name: string) => get<Job>("/jobs/" + encodeURIComponent(name)),
   verify: () => get<AuthInfo>("/auth/verify"),
+  testChannel: (type: string, target: string) =>
+    send<{ sent: boolean }>("POST", "/channels/test", { type, target }),
   playbook: (name: string) => get<{ path: string; content: string; found: boolean }>(
     "/jobs/" + encodeURIComponent(name) + "/playbook"),
   runJob: (name: string) => send<{ started: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/run"),
