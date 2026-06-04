@@ -52,6 +52,18 @@ spec:
               value: "false"
             - name: RECONCILE_INTERVAL
               value: "15m"
+            # Auth is OFF by default (open). To turn it on, create the `rudder-api`
+            # Secret out-of-band (values never in git); these optional refs then
+            # enable shared-key auth + RBAC. Absent secret ⇒ open fallback.
+            #   kubectl -n rudder create secret generic rudder-api \
+            #     --from-literal=RUDDER_API_KEY=$(openssl rand -hex 24) \
+            #     --from-literal=RUDDER_API_KEYS="<opkey>:operator,<viewkey>:viewer"
+            - name: RUDDER_API_KEY
+              valueFrom:
+                secretKeyRef: { name: rudder-api, key: RUDDER_API_KEY, optional: true }
+            - name: RUDDER_API_KEYS
+              valueFrom:
+                secretKeyRef: { name: rudder-api, key: RUDDER_API_KEYS, optional: true }
           startupProbe:                          # allow slow first boot (Vault unseal)
             httpGet: { path: /readyz, port: 8090 }
             periodSeconds: 5
