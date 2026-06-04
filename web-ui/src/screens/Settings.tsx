@@ -75,7 +75,16 @@ function SourceRow({ icon: I, name, src, last }: { icon: IconFn; name: React.Rea
 const SECRET_KIND: Record<string, string> = { "ssh-key": "SSH key", token: "Token", "app-creds": "App creds", key: "Key" };
 
 export function SettingsScreen({ nav }: { nav: NavFn }) {
-  const { repos, secrets, channels, reconcile, removeRepo, flash, isAdmin, canWrite } = useData();
+  const { repos, secrets, channels, reconcile, removeRepo, flash, refresh, isAdmin, canWrite } = useData();
+  const rotateSecret = async () => {
+    try {
+      await api.rotateSecret();
+      flash("Run SSH key rotated", "ok", "add the new public key to your fleet");
+      refresh();
+    } catch {
+      flash("Rotation failed", "fail");
+    }
+  };
   const testChannel = async (type: string, target: string) => {
     try {
       const r = await api.testChannel(type, target);
@@ -171,9 +180,9 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
                   <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: ".04em", textTransform: "uppercase", padding: "1px 6px", borderRadius: 4, color: "var(--text-3)", background: "var(--surface-3)", border: "1px solid var(--line-soft)" }}>{SECRET_KIND[s.kind] || s.kind}</span>
                   <span className="mono" style={{ fontSize: 11, letterSpacing: 1, color: "var(--text-faint)" }}>••••••••</span>
                 </div>
-                <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>referenced by jobs · rotated {relTime(s.rotated)}</div>
+                <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>referenced by jobs · {s.rotated ? `rotated ${relTime(s.rotated)}` : "never rotated"}</div>
               </div>
-              <Btn size="sm" kind="ghost" icon={Icons.refresh}>Rotate</Btn>
+              {isAdmin && s.rotatable && <Btn size="sm" kind="ghost" icon={Icons.refresh} onClick={rotateSecret}>Rotate</Btn>}
             </SettingsRow>
           )) : <div style={{ padding: "6px 0", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>No secret references yet.</div>}
         </div>

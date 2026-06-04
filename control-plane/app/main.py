@@ -377,3 +377,16 @@ def get_secrets():
         return vault.list_secret_refs()
     except Exception:
         return []
+
+
+@app.post("/secrets/rotate")
+def rotate_secret(request: Request,
+                  principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
+    """Rotate the Rudder-managed run SSH key. Operator-supplied secrets (git
+    tokens, vault passwords) are rotated by re-submitting them via Credentials."""
+    try:
+        res = vault.rotate_ssh_key()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"rotate failed: {e}")
+    audit.record(principal, "secret.rotate", "vault/ssh-deploy-key", request)
+    return res

@@ -44,6 +44,10 @@ spec:
         - name: web-ui
           image: {{ include "rudder.image" (dict "root" $ "component" .Values.webUi) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 80
           envFrom:

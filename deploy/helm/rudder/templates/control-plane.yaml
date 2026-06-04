@@ -65,6 +65,10 @@ spec:
         - name: control-plane
           image: {{ include "rudder.image" (dict "root" $ "component" .Values.controlPlane) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 8090
           lifecycle:

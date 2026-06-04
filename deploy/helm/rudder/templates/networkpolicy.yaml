@@ -1,0 +1,34 @@
+{{- if .Values.networkPolicy.enabled }}
+# Segment the namespace: backends (vault, control-plane, prometheus, pushgateway,
+# loki) accept ingress only from pods in this namespace; the web-ui stays open so
+# an ingress controller / LoadBalancer / NodePort can reach it. Egress is left
+# unrestricted (control-plane needs git, Vault, and SSH to the fleet).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "rudder.fullname" . }}-backends
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: NotIn, values: ["web-ui"] }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector: {}        # same namespace only
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "rudder.fullname" . }}-web-ui
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: web-ui
+  policyTypes: ["Ingress"]
+  ingress:
+    - {}                          # reachable from anywhere (front door)
+{{- end }}

@@ -85,6 +85,7 @@ export const api = {
     send<{ stopped: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/runs/" + encodeURIComponent(runId) + "/stop"),
   hostStats: () => get<HostStats>("/host-stats"),
   audit: () => get<AuditEntry[]>("/audit"),
+  rotateSecret: () => send<{ public: string; rotated: number }>("POST", "/secrets/rotate"),
   reconcile: () => get<Reconcile>("/reconcile"),
   reconcileNow: () => send<Reconcile>("POST", "/reconcile"),
   activity: () => get<ActivityItem[]>("/activity"),
