@@ -75,7 +75,7 @@ function SourceRow({ icon: I, name, src, last }: { icon: IconFn; name: React.Rea
 const SECRET_KIND: Record<string, string> = { "ssh-key": "SSH key", token: "Token", "app-creds": "App creds", key: "Key" };
 
 export function SettingsScreen({ nav }: { nav: NavFn }) {
-  const { repos, secrets, channels, reconcile, removeRepo, flash } = useData();
+  const { repos, secrets, channels, reconcile, removeRepo, flash, isAdmin, canWrite } = useData();
   const testChannel = async (type: string, target: string) => {
     try {
       const r = await api.testChannel(type, target);
@@ -122,15 +122,17 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
                 Fix auth
               </Btn>
             )}
-            <Btn size="sm" kind="ghost" icon={Icons.key} onClick={() => nav("credentials", { rid: r.id })}>Credentials</Btn>
-            <Btn size="sm" kind="ghost" danger icon={Icons.x} onClick={() => removeRepo(r.id)}>Remove</Btn>
+            {isAdmin && <Btn size="sm" kind="ghost" icon={Icons.key} onClick={() => nav("credentials", { rid: r.id })}>Credentials</Btn>}
+            {isAdmin && <Btn size="sm" kind="ghost" danger icon={Icons.x} onClick={() => removeRepo(r.id)}>Remove</Btn>}
           </SettingsRow>
         )) : (
           <div style={{ padding: "8px 0 4px", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>No repositories connected yet.</div>
         )}
-        <div style={{ marginTop: 12 }}>
-          <Btn kind="primary" icon={Icons.plus} onClick={() => nav("connect")}>Connect a repository</Btn>
-        </div>
+        {isAdmin && (
+          <div style={{ marginTop: 12 }}>
+            <Btn kind="primary" icon={Icons.plus} onClick={() => nav("connect")}>Connect a repository</Btn>
+          </div>
+        )}
       </Block>
 
       <Block title="Observability sources"
@@ -191,7 +193,7 @@ export function SettingsScreen({ nav }: { nav: NavFn }) {
                 <div style={{ fontSize: "var(--fs-sm)", color: "var(--text)", fontWeight: 550 }}>{c.label}</div>
                 <div style={{ fontSize: 11.5, color: "var(--text-faint)", marginTop: 2 }}>{c.type} · on {c.on.join(", ") || "—"}</div>
               </div>
-              <Btn kind="bare" size="sm" icon={Icons.bell} onClick={() => testChannel(c.type, c.target)}>Test</Btn>
+              {canWrite && <Btn kind="bare" size="sm" icon={Icons.bell} onClick={() => testChannel(c.type, c.target)}>Test</Btn>}
               <StatusPill s={c.enabled ? "ok" : "never"} size="sm">{c.enabled ? "On" : "Off"}</StatusPill>
             </SettingsRow>
           );

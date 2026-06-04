@@ -52,7 +52,7 @@ function Meta({ k, v, color }: { k: React.ReactNode; v: React.ReactNode; color?:
 }
 
 export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
-  const { runJob } = useData();
+  const { runJob, canWrite } = useData();
   const [job, setJob] = React.useState<Job | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [sel, setSel] = React.useState<string | undefined>(undefined);
@@ -132,9 +132,9 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
         </div>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           <Btn kind="solid" icon={Icons.doc} onClick={() => nav("manifest")}>Manifest</Btn>
-          {isRunning
+          {canWrite && (isRunning
             ? <Btn kind="solid" icon={Icons.x} onClick={onStop}>Stop</Btn>
-            : <Btn kind="primary" icon={Icons.play} onClick={onRun}>Run now</Btn>}
+            : <Btn kind="primary" icon={Icons.play} onClick={onRun}>Run now</Btn>)}
         </div>
       </div>
 

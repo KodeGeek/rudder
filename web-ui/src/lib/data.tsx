@@ -15,6 +15,9 @@ export interface DataCtx {
   error: string | null;
   unauthorized: boolean;
   signOut: () => void;
+  role: string;
+  canWrite: boolean;   // admin or operator
+  isAdmin: boolean;
   live: boolean;
   repos: ConnectedRepo[];
   jobs: Job[];
@@ -48,6 +51,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = React.useState(live);
   const [error, setError] = React.useState<string | null>(null);
   const [unauthorized, setUnauthorized] = React.useState(false);
+  const [role, setRole] = React.useState("admin");   // corrected by /auth/verify below
   const [toast, setToast] = React.useState<ToastData | null>(null);
   const toastTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,6 +99,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return () => clearInterval(id);
   }, [refresh, live]);
 
+  React.useEffect(() => {
+    if (!live) return;
+    api.verify().then((v) => setRole(v.role)).catch(() => { /* keep optimistic */ });
+  }, [live, unauthorized]);
+
   const addRepo = React.useCallback(async (r: NewRepo) => {
     const rec = await api.addRepo(r);
     if (rec && rec.error) flash(`Connected, but sync failed: ${rec.error}`, "fail");
@@ -133,6 +142,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const value: DataCtx = {
     loading, error, unauthorized, signOut, live, ...state, toast, flash, refresh,
+    role, canWrite: role !== "viewer", isAdmin: role === "admin",
     addRepo, removeRepo, runJob, reconcileNow,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

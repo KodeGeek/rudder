@@ -7,10 +7,14 @@ def env(key: str, default: str = "") -> str:
 
 
 # ── API auth ──
-# Shared API key guarding all endpoints. When unset, the API is open (localhost /
-# community fallback) — set this (from a Secret) for any non-localhost exposure.
-# Real SSO/OIDC is delegated to an authenticating reverse proxy in front of Rudder.
+# Shared API key guarding all endpoints. When unset (and RUDDER_API_KEYS empty),
+# the API is open (localhost / community fallback) — set this (from a Secret) for
+# any non-localhost exposure. RUDDER_API_KEY is treated as an admin key.
 API_KEY = env("RUDDER_API_KEY", "")
+# Optional RBAC: comma-separated "key:role" pairs, role in {admin,operator,viewer}.
+# e.g. RUDDER_API_KEYS="k1:admin,k2:operator,k3:viewer". Real SSO/OIDC is delegated
+# to an authenticating reverse proxy, whose identity header is used for attribution.
+API_KEYS = env("RUDDER_API_KEYS", "")
 
 # ── Vault (OpenBao) ──
 VAULT_ADDR = env("VAULT_ADDR", "http://vault:8200")

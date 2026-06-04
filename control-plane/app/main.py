@@ -187,7 +187,7 @@ class RepoIn(BaseModel):
 
 
 @app.post("/repos")
-def add_repo(body: RepoIn):
+def add_repo(body: RepoIn, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     rec = store.add_repo(body.provider, body.url, body.branch, body.token, body.authMethod, body.vaultPass)
     try:
         store.reconcile_repo(rec["id"])
@@ -206,7 +206,7 @@ class CredsIn(BaseModel):
 
 
 @app.post("/repos/credentials")
-def set_credentials(body: CredsIn):
+def set_credentials(body: CredsIn, principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
     """Write-only: store run/decrypt secrets in Vault. NEVER returns secret
     values — only boolean 'configured' flags. Submitting a value overwrites it."""
     r = store.repos.get(body.rid)
@@ -236,7 +236,7 @@ class DeployKeyIn(BaseModel):
 
 
 @app.post("/deploy-key")
-def deploy_key(body: DeployKeyIn):
+def deploy_key(body: DeployKeyIn, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     """Generate (if needed) a per-repo deploy keypair; return the PUBLIC key for
     the operator to add to the repo's deploy keys on the provider side."""
     rid = f"{body.provider}:{store._slug(body.url)}"
@@ -245,7 +245,7 @@ def deploy_key(body: DeployKeyIn):
 
 
 @app.delete("/repos/{rid:path}")
-def delete_repo(rid: str):
+def delete_repo(rid: str, principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
     store.remove_repo(rid)
     schedule_all()
     return Response(status_code=204)
@@ -257,7 +257,7 @@ def get_reconcile():
 
 
 @app.post("/reconcile")
-def post_reconcile():
+def post_reconcile(principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     reconcile_all()
     return store.reconcile_state
 
@@ -275,7 +275,7 @@ def get_job(name: str):
 
 
 @app.post("/jobs/{name}/run")
-def run_now(name: str):
+def run_now(name: str, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     if name not in store.jobs:
         raise HTTPException(status_code=404, detail="job not found")
     try:
@@ -288,7 +288,7 @@ def run_now(name: str):
 
 
 @app.post("/jobs/{name}/runs/{run_id}/stop")
-def stop_run(name: str, run_id: str):
+def stop_run(name: str, run_id: str, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     if name not in store.jobs:
         raise HTTPException(status_code=404, detail="job not found")
     return {"stopped": runner.stop_run(run_id)}
@@ -341,7 +341,7 @@ class ChannelTest(BaseModel):
 
 
 @app.post("/channels/test")
-def test_channel(body: ChannelTest):
+def test_channel(body: ChannelTest, principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     try:
         ok = alerts.test_channel({"type": body.type, "target": body.target, "label": body.target})
         return {"sent": ok}
