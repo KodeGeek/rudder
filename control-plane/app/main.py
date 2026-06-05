@@ -357,6 +357,13 @@ def get_channels():
     return store.channels_view()
 
 
+@app.get("/dashboard")
+def get_dashboard():
+    """The committed Overview layout (dashboard: in rudder.yml), or widgets:null
+    when none is set so the UI uses its built-in default layout."""
+    return store.dashboard_view() or {"cols": 12, "widgets": None}
+
+
 class ChannelTest(BaseModel):
     type: str = "webhook"
     target: str = ""

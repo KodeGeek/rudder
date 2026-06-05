@@ -726,3 +726,56 @@ def manifest_view() -> dict:
 
 def channels_view() -> list:
     return channels
+
+
+# ── dashboard layout (committed in rudder.yml, read on reconcile) ──
+def _norm_widget(w):
+    """Normalize one widget's shape. Returns None for junk. Validates structure
+    only — the web-ui owns the catalog of known types and skips ones it doesn't
+    recognize, so backend and frontend don't duplicate the widget list."""
+    if not isinstance(w, dict):
+        return None
+    t = w.get("type")
+    if not isinstance(t, str) or not t.strip():
+        return None
+
+    def _i(v, default, lo=0):
+        try:
+            return max(lo, int(v))
+        except (TypeError, ValueError):
+            return default
+
+    out = {"type": t.strip(), "x": _i(w.get("x"), 0), "y": _i(w.get("y"), 0),
+           "w": _i(w.get("w"), 4, lo=1), "h": _i(w.get("h"), 2, lo=1)}
+    m = w.get("metric")
+    if isinstance(m, str) and m.strip():
+        out["metric"] = m.strip()
+    return out
+
+
+def dashboard_view():
+    """Parse the committed `dashboard:` block from rudder.yml (first repo that
+    defines one) into a normalized {cols, widgets} layout, or None if absent.
+
+    Never raises: a malformed block yields None so the UI falls back to its
+    built-in default layout — a bad commit can't take down the Overview."""
+    for m in manifests.values():
+        try:
+            data = yaml.safe_load(m.get("rudderYaml") or "") or {}
+        except Exception:
+            continue
+        dash = data.get("dashboard") if isinstance(data, dict) else None
+        if not isinstance(dash, dict) or not isinstance(dash.get("widgets"), list):
+            continue
+        widgets = [x for x in (_norm_widget(w) for w in dash["widgets"]) if x]
+        if not widgets:
+            continue
+        try:
+            cols = min(24, max(1, int(dash.get("cols", 12))))
+        except (TypeError, ValueError):
+            cols = 12
+        for w in widgets:                       # clamp to the grid width
+            w["w"] = min(w["w"], cols)
+            w["x"] = min(w["x"], cols - w["w"])
+        return {"cols": cols, "widgets": widgets}
+    return None
