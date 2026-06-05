@@ -423,11 +423,13 @@ const GRID_CSS = `
 .rdash .react-grid-item.react-grid-placeholder { background: var(--accent); opacity: .18; border-radius: var(--r-lg); }
 .rdash .react-grid-item.resizing, .rdash .react-grid-item.react-draggable-dragging { z-index: 6; transition: none; }
 .rdash-cell { height: 100%; }
-.rdash-body { height: 100%; overflow: auto; }
-.rdash-body > * { height: 100%; box-sizing: border-box; }
+/* Scroll INSIDE each card (not the cell body) so the card's rounded border
+   stays pinned to the cell edge and can't float into the middle mid-scroll. */
+.rdash-body { height: 100%; overflow: hidden; }
+.rdash-body > * { height: 100%; box-sizing: border-box; overflow: auto; }
 /* In edit mode clip overflow so a card scrollbar can't sit on top of the
    bottom-right resize handle and steal the grab. */
-.rdash--edit .rdash-body { overflow: hidden; }
+.rdash--edit .rdash-body > * { overflow: hidden; }
 .rdash-handle { position: absolute; inset: 0 0 auto 0; height: 26px; display: flex; align-items: center; gap: 7px;
   padding: 0 8px; background: var(--accent-soft); border-bottom: 1px solid var(--line-soft);
   border-radius: var(--r-lg) var(--r-lg) 0 0; cursor: move; z-index: 3; font-size: 11px; color: var(--accent-text); }
