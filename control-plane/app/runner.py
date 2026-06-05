@@ -199,8 +199,10 @@ def run_job(name: str, manual: bool = False):
                 proc.kill()
 
         _running[run_id] = proc
-        timer = threading.Timer(1800, _on_timeout)
-        timer.start()
+        timer = None
+        if config.RUN_TIMEOUT_SECONDS > 0:
+            timer = threading.Timer(config.RUN_TIMEOUT_SECONDS, _on_timeout)
+            timer.start()
         try:
             for line in proc.stdout:
                 ln = line.rstrip("\n")
@@ -211,10 +213,11 @@ def run_job(name: str, manual: bool = False):
                 store.append_run_log(name, run_id, entry)
             proc.wait()
         finally:
-            timer.cancel()
+            if timer:
+                timer.cancel()
 
         if timed_out:
-            log_lines.append({"t": "err", "text": "control-plane: playbook timed out (30m)"})
+            log_lines.append({"t": "err", "text": f"control-plane: playbook timed out ({config.RUN_TIMEOUT})"})
             exit_code = 124
         elif run_id in _stopped:
             _stopped.discard(run_id)
@@ -237,10 +240,10 @@ def run_job(name: str, manual: bool = False):
     duration = int(time.time() - started)
     status = "success" if exit_code == 0 else "failed"
     out = "\n".join(e["text"] for e in log_lines)
-    log = log_lines[-400:] or [{"t": "task", "text": "(no output)"}]
+    tail = log_lines[-400:] or [{"t": "task", "text": "(no output)"}]
     store.replace_run(name, run_id, {
         "id": run_id, "at": int(time.time() * 1000), "status": status,
-        "duration": duration, "exit": exit_code, "host": target_label, "log": log,
+        "duration": duration, "exit": exit_code, "host": target_label, "log": tail,
     })
     telemetry.push_metrics(name, status == "success", exit_code, duration)
     telemetry.push_logs(name, status, out)
@@ -280,6 +283,15 @@ def run_async(name: str, manual: bool = True):
         _inflight[name] = fut
 
     def _cleanup(f, n=name):
+        # Surface any exception raised inside run_job: a ThreadPoolExecutor future
+        # swallows it until .result() is called, so without this a crash in the
+        # runner looks like "submitted 200 OK but nothing ever happened".
+        try:
+            exc = f.exception()
+        except Exception:
+            exc = None
+        if exc is not None:
+            log.error("run crashed", job=n, error=repr(exc))
         with _inflight_lock:
             if _inflight.get(n) is f:
                 _inflight.pop(n, None)

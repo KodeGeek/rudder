@@ -151,9 +151,12 @@ kubectl apply -k deploy/k8s
 
 Point the UI at **external** Prometheus/Loki/Vault by editing the
 `web-ui-config` ConfigMap in `10-web-ui.yaml` (or drop the bundled Deployments
-and set the URLs to your existing services). The control-plane manifest
-(`50-control-plane.yaml`) is included but left out of `kustomization.yaml` until
-its image exists (Phase 2).
+and set the URLs to your existing services).
+
+> **Prefer Helm.** For most clusters the packaged chart is the easier path —
+> parameterized storage class, service type / ingress, API key, and cloud
+> overlays — see **[INSTALL.md](INSTALL.md)**. These raw kustomize manifests are
+> the single-node reference deploy.
 
 ---
 
@@ -176,7 +179,7 @@ schedules, and credentials all persist. State lives on **named Docker volumes**:
 | Secrets — SSH keys, vault passwords, tokens | `vault-data` (encrypted at rest) | ✅ |
 | Vault unseal key + root token | `vault-shared` | ✅ |
 | Bundled Git server data | `gitea-data` | ✅ |
-| Run history | — (in-memory) | ✗ — the durable copy is in Loki |
+| Run history + logs (SQLite) | `cp-work` | ✅ |
 
 For an **unattended** reboot to "just work", two host-level requirements:
 

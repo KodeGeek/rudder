@@ -44,11 +44,15 @@ def _next_ms(name: str):
 def schedule_all():
     if not scheduler.running:
         return
-    current = {f"job:{n}" for n in store.jobs}
+    # Snapshot under the store lock: reconcile_repo → _render_jobs mutates
+    # store.jobs concurrently, so iterating it live risks "dict changed size".
+    with store._lock:
+        snapshot = list(store.jobs.items())
+    current = {f"job:{n}" for n, _ in snapshot}
     for sj in scheduler.get_jobs():
         if sj.id.startswith("job:") and sj.id not in current:
             scheduler.remove_job(sj.id)
-    for name, j in store.jobs.items():
+    for name, j in snapshot:
         try:
             scheduler.add_job(
                 runner.submit_scheduled, CronTrigger.from_crontab(j["cron"]), args=[name],
@@ -103,6 +107,9 @@ def _boot():
     except Exception as e:
         print("main: gitea seed failed:", e)
     store.load_repos()
+    reaped = store.reap_orphaned_runs()   # runs orphaned by a previous process restart
+    if reaped:
+        print(f"main: reaped {reaped} orphaned run(s) left 'running' by a prior process")
     store.load_runs()
     if not scheduler.running:
         scheduler.start()
@@ -348,6 +355,13 @@ def get_manifest():
 @app.get("/channels")
 def get_channels():
     return store.channels_view()
+
+
+@app.get("/dashboard")
+def get_dashboard():
+    """The committed Overview layout (dashboard: in rudder.yml), or widgets:null
+    when none is set so the UI uses its built-in default layout."""
+    return store.dashboard_view() or {"cols": 12, "widgets": None}
 
 
 class ChannelTest(BaseModel):

@@ -50,9 +50,29 @@ TARGET_HOST = env("TARGET_HOST", "target")
 TARGET_USER = env("TARGET_USER", "rudder")
 TARGET_PORT = env("TARGET_PORT", "22")
 
+def _seconds(s: str, default: int) -> int:
+    """Parse a duration like '30m' / '2h' / '90s' / '120' into seconds."""
+    s = (s or "").strip().lower()
+    try:
+        if s.endswith("m"):
+            return int(s[:-1]) * 60
+        if s.endswith("h"):
+            return int(s[:-1]) * 3600
+        if s.endswith("s"):
+            return int(s[:-1])
+        return int(s)
+    except ValueError:
+        return default
+
+
 # ── Run execution (bounded worker pool + backpressure) ──
 RUN_WORKERS = int(env("RUN_WORKERS", "4"))        # concurrent playbook runs
 RUN_QUEUE_MAX = int(env("RUN_QUEUE_MAX", "20"))   # total in-flight (running+queued) before 429
+# Hard per-run timeout: a playbook still running after this is SIGKILLed (whole
+# process group, incl. ssh children) so a hung run can't execute indefinitely.
+# Accepts 30m / 2h / 90s / seconds; set to 0 to disable.
+RUN_TIMEOUT = env("RUN_TIMEOUT", "30m")
+RUN_TIMEOUT_SECONDS = _seconds(RUN_TIMEOUT, 1800)
 
 # ── Reconcile + state ──
 RECONCILE_INTERVAL = env("RECONCILE_INTERVAL", "2m")

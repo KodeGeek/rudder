@@ -65,6 +65,11 @@ export interface AuditEntry {
 export interface ResourceUse { used: number; total: number; pct: number }
 export interface HostStats { cpu?: number; mem?: ResourceUse; disk?: ResourceUse; source?: string; error?: string }
 
+// The committed Overview layout (dashboard: in rudder.yml). widgets:null ⇒ none
+// committed, so the UI renders its built-in default layout.
+export interface WidgetSpec { type: string; metric?: string; x: number; y: number; w: number; h: number }
+export interface DashboardLayout { cols: number; widgets: WidgetSpec[] | null }
+
 export const api = {
   info: () => get<Info>("/info"),
   repos: () => get<ConnectedRepo[]>("/repos"),
@@ -93,4 +98,5 @@ export const api = {
   secrets: () => get<SecretRef[]>("/secrets"),
   channels: () => get<Channel[]>("/channels"),
   manifest: () => get<ManifestDoc>("/manifest"),
+  dashboard: () => get<DashboardLayout>("/dashboard"),
 };

@@ -98,6 +98,25 @@ def test_json_migration_imports_and_retires_files(freshdb):
     assert not os.path.exists(config.RUNS_FILE) and os.path.exists(config.RUNS_FILE + ".imported")
 
 
+def test_reap_orphaned_runs_finalizes_stuck_running(freshdb):
+    # Simulate a process restart: a run left 'running' in the DB with no live process.
+    store.add_run("job1", _run("r1", 1000, status="running", log=[{"t": "play", "text": "starting"}]))
+    store.add_run("job1", _run("r2", 2000, status="success"))   # a healthy completed run
+    reaped = store.reap_orphaned_runs()
+    assert reaped == 1
+    rows = {r["id"]: r for r in db.conn().execute(
+        "SELECT id, status, exit, streaming FROM runs").fetchall()}
+    assert rows["r1"]["status"] == "failed" and rows["r1"]["exit"] == 137 and rows["r1"]["streaming"] == 0
+    assert rows["r2"]["status"] == "success"                    # untouched
+    # the embedded JSON blob is updated too (UI reads it), and an interrupt note is logged
+    meta = json.loads(db.conn().execute("SELECT json FROM runs WHERE id='r1'").fetchone()["json"])
+    assert meta["status"] == "failed" and meta["streaming"] is False
+    last = db.conn().execute(
+        "SELECT text FROM run_logs WHERE run_id='r1' ORDER BY id DESC LIMIT 1").fetchone()["text"]
+    assert "interrupted" in last
+    assert store.reap_orphaned_runs() == 0                      # idempotent: nothing left running
+
+
 def test_job_view_shape_unchanged(freshdb):
     store.jobs["job1"] = {
         "name": "job1", "cron": "0 3 * * *", "playbook": "p.yml", "limit": "all",
