@@ -421,13 +421,21 @@ const known = (w: WidgetItem) => REGISTRY[w.type] !== undefined;
 /* ──────────────────────────── edit-mode chrome ────────────────────────── */
 const GRID_CSS = `
 .rdash .react-grid-item.react-grid-placeholder { background: var(--accent); opacity: .18; border-radius: var(--r-lg); }
+.rdash .react-grid-item.resizing, .rdash .react-grid-item.react-draggable-dragging { z-index: 6; transition: none; }
 .rdash-cell { height: 100%; }
 .rdash-body { height: 100%; overflow: auto; }
 .rdash-body > * { height: 100%; box-sizing: border-box; }
+/* In edit mode clip overflow so a card scrollbar can't sit on top of the
+   bottom-right resize handle and steal the grab. */
+.rdash--edit .rdash-body { overflow: hidden; }
 .rdash-handle { position: absolute; inset: 0 0 auto 0; height: 26px; display: flex; align-items: center; gap: 7px;
   padding: 0 8px; background: var(--accent-soft); border-bottom: 1px solid var(--line-soft);
   border-radius: var(--r-lg) var(--r-lg) 0 0; cursor: move; z-index: 3; font-size: 11px; color: var(--accent-text); }
 .rdash--edit .react-grid-item { outline: 1px dashed var(--line); outline-offset: -1px; border-radius: var(--r-lg); }
+/* Bigger, clearly visible resize grip on top of everything while editing. */
+.rdash--edit .react-resizable-handle { width: 26px; height: 26px; z-index: 5; padding: 0; }
+.rdash--edit .react-resizable-handle::after { width: 9px; height: 9px; right: 5px; bottom: 5px;
+  border-right: 2px solid var(--accent-text); border-bottom: 2px solid var(--accent-text); }
 `;
 
 function AddPicker({ onPick, onClose }: { onPick: (c: CatalogEntry) => void; onClose: () => void }) {
@@ -582,7 +590,7 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
 
       <Grid className={`rdash${edit ? " rdash--edit" : ""}`} layout={layout} cols={cols} rowHeight={26}
         margin={[16, 16]} containerPadding={[0, 0]} isDraggable={edit} isResizable={edit}
-        draggableHandle=".rdash-handle" compactType="vertical" onLayoutChange={onLayoutChange}>
+        draggableHandle=".rdash-handle" draggableCancel=".rdash-no-drag" compactType="vertical" onLayoutChange={onLayoutChange}>
         {visible.map((it) => (
           <div key={it.id} className="rdash-cell">
             {edit && (
@@ -591,12 +599,14 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {(CATALOG.find((c) => c.type === it.type && c.metric === it.metric)?.label) || it.metric || it.type}
                 </span>
-                <button onClick={() => remove(it.id)} title="Remove widget"
-                  style={{ display: "grid", placeItems: "center", width: 18, height: 18, border: "none", borderRadius: 5,
-                    background: "transparent", color: "var(--text-3)", cursor: "pointer" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-3)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                  <Icons.x size={13} />
+                <button className="rdash-no-drag" title="Remove widget"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); remove(it.id); }}
+                  style={{ display: "grid", placeItems: "center", width: 24, height: 24, border: "none", borderRadius: 6,
+                    background: "transparent", color: "var(--text-2)", cursor: "pointer", marginRight: -2, flexShrink: 0 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--fail-dim)"; e.currentTarget.style.color = "var(--fail)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-2)"; }}>
+                  <Icons.x size={15} sw={2.2} />
                 </button>
               </div>
             )}
