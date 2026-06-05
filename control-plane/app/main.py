@@ -103,6 +103,9 @@ def _boot():
     except Exception as e:
         print("main: gitea seed failed:", e)
     store.load_repos()
+    reaped = store.reap_orphaned_runs()   # runs orphaned by a previous process restart
+    if reaped:
+        print(f"main: reaped {reaped} orphaned run(s) left 'running' by a prior process")
     store.load_runs()
     if not scheduler.running:
         scheduler.start()

@@ -13,6 +13,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 
 from . import config
 
@@ -176,6 +177,32 @@ def delete_job_runs(job):
 def run_count():
     with _clock:
         return conn().execute("SELECT COUNT(*) AS n FROM runs").fetchone()["n"]
+
+
+def reap_orphaned_runs(exit_code=137, note="■ interrupted — control-plane restarted"):
+    """Finalize runs left in 'running' by a previous process (pod restart/crash).
+
+    A live run is always tracked in the runner's in-memory map, and its timeout
+    timer + finalizer run inside that process — so when the process dies mid-run
+    the row stays 'running' forever. On a fresh boot every 'running' row is such
+    an orphan; mark them failed and stamp a log line. Returns how many were reaped."""
+    with _clock:
+        c = conn()
+        rows = c.execute("SELECT id, at, json FROM runs WHERE status='running'").fetchall()
+        now = int(time.time() * 1000)
+        for r in rows:
+            try:
+                meta = json.loads(r["json"])
+            except Exception:
+                meta = {}
+            meta.update(status="failed", exit=exit_code, streaming=False)
+            if meta.get("duration") is None and r["at"]:
+                meta["duration"] = max(0, (now - r["at"]) // 1000)
+            c.execute("UPDATE runs SET status='failed', exit=?, streaming=0, json=? WHERE id=?",
+                      (exit_code, json.dumps(meta), r["id"]))
+            c.execute("INSERT INTO run_logs(run_id, t, text) VALUES(?,?,?)", (r["id"], "err", note))
+        c.commit()
+        return len(rows)
 
 
 def audit_insert(at, principal, role, action, target, source_ip, detail):

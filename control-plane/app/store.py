@@ -567,6 +567,17 @@ def _parse_yaml_inventory(text: str):
 
 
 # ── run history (SQLite-backed; in-memory dict is a read cache) ──
+def reap_orphaned_runs() -> int:
+    """Finalize runs left 'running' by a previous process (pod restart/crash) so
+    they don't show 'in progress' forever. Call once at startup, before load_runs."""
+    _ensure_migrated()
+    try:
+        return db.reap_orphaned_runs()
+    except Exception as e:
+        print("store: reap orphaned runs failed:", e)
+        return 0
+
+
 def load_runs():
     _ensure_migrated()
     try:

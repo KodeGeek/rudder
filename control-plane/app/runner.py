@@ -199,8 +199,10 @@ def run_job(name: str, manual: bool = False):
                 proc.kill()
 
         _running[run_id] = proc
-        timer = threading.Timer(1800, _on_timeout)
-        timer.start()
+        timer = None
+        if config.RUN_TIMEOUT_SECONDS > 0:
+            timer = threading.Timer(config.RUN_TIMEOUT_SECONDS, _on_timeout)
+            timer.start()
         try:
             for line in proc.stdout:
                 ln = line.rstrip("\n")
@@ -211,10 +213,11 @@ def run_job(name: str, manual: bool = False):
                 store.append_run_log(name, run_id, entry)
             proc.wait()
         finally:
-            timer.cancel()
+            if timer:
+                timer.cancel()
 
         if timed_out:
-            log_lines.append({"t": "err", "text": "control-plane: playbook timed out (30m)"})
+            log_lines.append({"t": "err", "text": f"control-plane: playbook timed out ({config.RUN_TIMEOUT})"})
             exit_code = 124
         elif run_id in _stopped:
             _stopped.discard(run_id)
