@@ -27,6 +27,18 @@ manifest, open a PR, merge — the schedule reconciles itself on the next pull.
 Think of it as **cron + Argo-CD-style GitOps + a status page**, purpose-built for
 Ansible: self-hosted, fully containerized, and with **no secrets ever in Git**.
 
+## Features at a glance
+
+- **GitOps schedule** — a `jobs.yml` in your repo is the single source of truth; reconciles on every pull.
+- **Real Ansible over SSH** — bundles common collections, reads your existing inventory, host-key trust-on-first-use.
+- **Live logs & control** — watch a run stream line-by-line, view the playbook YAML, and **stop** a run from the UI.
+- **Secrets in Vault** — SSH keys / vault passwords / Git tokens are write-only, encrypted at rest, never in Git or on screen.
+- **Optional auth + RBAC** — starts open; add a shared API key to enable `admin` / `operator` / `viewer` roles, or front it with SSO.
+- **Observability** — control-plane self-`/metrics`, Prometheus alert rules, per-run metrics, logs to Loki, host CPU/mem/disk.
+- **Audit trail** — append-only record of every mutation (who / what / when / source IP), surfaced in the UI.
+- **Notifications** — Slack / Teams / email / webhook on job failure, success, and recovery, routed per job.
+- **Deploy anywhere** — `docker compose` on one host, or a Helm chart for any Kubernetes (kind, AKS, EKS, GKE, OpenShift).
+
 ## Why it exists
 
 Teams that manage servers with Ansible usually end up with a pile of `crontab`
@@ -125,9 +137,22 @@ docker compose --profile bundled --profile backend up --build
 ```
 
 Point it at **your own** GitHub / Azure DevOps repo from the **Settings → Connect**
-screen (public, access token, or deploy key). See
-**[deploy/DEPLOY.md](deploy/DEPLOY.md)** for Kubernetes, external
-Prometheus/Loki/Vault, and production notes.
+screen (public, access token, or deploy key).
+
+## Quick start (Kubernetes)
+
+Published multi-arch images (GHCR) install on any cluster via the Helm chart — no
+local build:
+
+```bash
+helm install rudder deploy/helm/rudder -n rudder --create-namespace
+# UI → http://<node-ip>:30080   (or set webUi.service.type / ingress for cloud)
+```
+
+Cloud overlays (AKS / EKS / GKE / OpenShift), API-key/RBAC setup, ingress, and
+`helm test` are in **[deploy/INSTALL.md](deploy/INSTALL.md)**. For external
+Prometheus/Loki/Vault and production notes, see
+**[deploy/DEPLOY.md](deploy/DEPLOY.md)**.
 
 ## Security
 
@@ -135,10 +160,15 @@ Rudder holds fleet credentials and can run Ansible against your hosts — treat 
 as privileged infrastructure. Secrets live only in Vault (encrypted at rest,
 write-only, never in Git or on screen), and nothing sensitive is ever committed.
 
+Rudder **starts open** (no login — convenient on a trusted host). To lock it down,
+set a `RUDDER_API_KEY` and it enforces a shared key with `admin` / `operator` /
+`viewer` roles ([RBAC](docs/COMPLIANCE.md)); for real SSO, front it with an
+authenticating reverse proxy (OIDC/SAML). Every mutation is recorded in an
+append-only audit trail.
+
 **Before exposing it beyond a trusted host, read [SECURITY.md](SECURITY.md).** In
-short: the API has no built-in auth and the bundled stack speaks plain HTTP, so
-put it behind a VPN / SSO / authenticating reverse proxy with TLS, and use a real
-sealed Vault for production.
+short: turn on the API key (or SSO proxy), terminate TLS at the ingress (the
+bundled stack speaks plain HTTP), and use a real sealed Vault for production.
 
 ## Develop the UI
 
@@ -154,13 +184,14 @@ npm run build        # typecheck + production build → web-ui/dist
 ```
 rudder/
 ├── docker-compose.yml        segmented stack (profiles: bundled / backend / grafana)
-├── deploy/                   DEPLOY.md · prometheus.yml · k8s/ (per-component manifests)
+├── deploy/                   INSTALL.md · DEPLOY.md · k8s/ (manifests) · helm/rudder (chart)
 ├── web-ui/                   Vite + React + TypeScript (read-only observability UI)
 │   ├── Dockerfile            multi-stage: build → nginx
 │   ├── nginx/                reverse-proxy template + runtime-config entrypoint
 │   └── src/  components/ · screens/ · data/types · lib/{api,data,config,format}
 ├── control-plane/            Python/FastAPI: reconcile loop + Ansible runner + Vault + API
-│   ├── app/                  config · vault · gitea · store · runner · telemetry · main
+│   ├── app/                  config · vault · store (SQLite) · runner · auth · audit · metrics · main
+│   ├── tests/                pytest suite (run, queue, auth, audit, metrics, rotation…)
 │   └── seed/                 sample fleet repo (jobs.yml + playbooks) seeded into Gitea
 ├── vault/                    bundled Vault config + auto-unseal sidecar (encrypted persistence)
 ├── target/                   bundled sshd host real Ansible runs land on
@@ -168,6 +199,18 @@ rudder/
 ```
 
 Design notes and the full spec: [`docs/superpowers/specs/`](docs/superpowers/specs/).
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| **[deploy/INSTALL.md](deploy/INSTALL.md)** | Install with docker-compose or Helm (kind, AKS, EKS, GKE, OpenShift); API key & ingress. |
+| **[deploy/DEPLOY.md](deploy/DEPLOY.md)** | Architecture, external Prometheus/Loki/Vault, reboot-safety, production hardening. |
+| **[SECURITY.md](SECURITY.md)** | The secret model, auth options, and how to report a vulnerability. |
+| **[docs/RUNBOOK.md](docs/RUNBOOK.md)** | Day-2 ops: alerts → response, backup/restore, common failures. |
+| **[docs/COMPLIANCE.md](docs/COMPLIANCE.md)** | RBAC, audit, and a SOC 2 / ISO 27001 control mapping. |
+| **[docs/ENTERPRISE_ROADMAP.md](docs/ENTERPRISE_ROADMAP.md)** | Where Rudder is and what's next (multi-tenancy, HA). |
+| **[CONTRIBUTING.md](CONTRIBUTING.md)** | Dev setup, tests, and how to propose changes. |
 
 ## License
 

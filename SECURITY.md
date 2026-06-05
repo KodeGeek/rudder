@@ -33,11 +33,13 @@ secrets are handled and the hardening you must do before exposing it.
 These are intentional limits of the current release, not bugs. Rudder is safe to
 run on a trusted host/network; harden the following before any wider exposure.
 
-1. **Put it behind authentication. The API has none.** Anyone who can reach the
-   UI (`:8080`) or the control-plane (`:8090`) can trigger playbook runs against
-   your fleet, add repos, and overwrite credentials (they still cannot *read*
-   secrets). Bind these ports to localhost / a private network, and front them
-   with a VPN, SSO, or an authenticating reverse proxy. Do **not** publish them
+1. **Turn on authentication — it ships off by default.** With no `RUDDER_API_KEY`
+   set, the API is open: anyone who can reach the UI (`:8080`) or the control-plane
+   (`:8090`) can trigger playbook runs, add repos, and overwrite credentials (they
+   still cannot *read* secrets). Set `RUDDER_API_KEY` to require a shared key with
+   `admin` / `operator` / `viewer` roles (`RUDDER_API_KEYS`), and for real identity
+   front it with a VPN, SSO, or an authenticating reverse proxy (OIDC/SAML). Until
+   then, bind the ports to localhost / a private network — do **not** publish them
    to the internet.
 
 2. **Terminate TLS.** The bundled stack speaks plain HTTP. Pasted keys and
@@ -76,6 +78,7 @@ run on a trusted host/network; harden the following before any wider exposure.
 
 ## Reporting
 
-This is a community project shared as-is. If you find a vulnerability, open an
-issue describing the impact and reproduction (without including any real
-secrets).
+This is a community project shared as-is. If you find a vulnerability, **report it
+privately** — open a GitHub [security advisory](https://github.com/KodeGeek/rudder/security/advisories/new)
+rather than a public issue. Describe the impact and reproduction (without including
+any real secrets); we'll coordinate a fix and disclosure.
