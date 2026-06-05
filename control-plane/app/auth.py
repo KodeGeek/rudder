@@ -44,8 +44,11 @@ def _key_map() -> dict:
         if not pair or ":" not in pair:
             continue
         k, _, r = pair.partition(":")
+        k = k.strip()
+        if not k:                       # never register an empty key
+            continue
         try:
-            m[k.strip()] = Role(r.strip())
+            m[k] = Role(r.strip())
         except ValueError:
             pass
     return m

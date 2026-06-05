@@ -80,6 +80,17 @@ def test_viewer_blocked_from_writes(monkeypatch):
     assert ei.value.status_code == 403
 
 
+def test_empty_key_in_keys_never_matches(monkeypatch):
+    # A malformed ":viewer" pair must not register an empty key that an empty/
+    # absent token could match. No key set + empty pair → open fallback, not a grant.
+    monkeypatch.setattr(config, "API_KEY", "adminkey")
+    monkeypatch.setattr(config, "API_KEYS", ":viewer, opkey:operator")
+    assert "" not in auth._key_map()                       # empty key not registered
+    with pytest.raises(HTTPException):                      # empty token still rejected
+        auth.require_auth(_req("/repos"), _creds(""))
+    assert auth.require_auth(_req("/repos"), _creds("opkey")).role == auth.Role.operator
+
+
 def test_proxy_identity_attribution(monkeypatch):
     monkeypatch.setattr(config, "API_KEY", "adminkey")
     monkeypatch.setattr(config, "API_KEYS", "")

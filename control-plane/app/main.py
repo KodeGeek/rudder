@@ -44,11 +44,15 @@ def _next_ms(name: str):
 def schedule_all():
     if not scheduler.running:
         return
-    current = {f"job:{n}" for n in store.jobs}
+    # Snapshot under the store lock: reconcile_repo → _render_jobs mutates
+    # store.jobs concurrently, so iterating it live risks "dict changed size".
+    with store._lock:
+        snapshot = list(store.jobs.items())
+    current = {f"job:{n}" for n, _ in snapshot}
     for sj in scheduler.get_jobs():
         if sj.id.startswith("job:") and sj.id not in current:
             scheduler.remove_job(sj.id)
-    for name, j in store.jobs.items():
+    for name, j in snapshot:
         try:
             scheduler.add_job(
                 runner.submit_scheduled, CronTrigger.from_crontab(j["cron"]), args=[name],

@@ -215,6 +215,10 @@ def reconcile_repo(rid: str):
     branch = r["branch"]
     deploy = r.get("authMethod") == "deploykey"
     env = dict(os.environ)
+    # Fail fast instead of blocking on an interactive credential/passphrase prompt:
+    # in a non-tty container a wrong token or bad key would otherwise hang git/ssh
+    # forever and stall the whole reconcile loop.
+    env["GIT_TERMINAL_PROMPT"] = "0"
     key_path = None
     if deploy:
         try:
@@ -223,7 +227,7 @@ def reconcile_repo(rid: str):
             r["error"] = f"deploy key missing from Vault: {e}"
             return
         env["GIT_SSH_COMMAND"] = (
-            f"ssh -i {key_path} -o IdentitiesOnly=yes "
+            f"ssh -i {key_path} -o IdentitiesOnly=yes -o BatchMode=yes "
             "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
         )
         url = _ssh_url(r["url"])
