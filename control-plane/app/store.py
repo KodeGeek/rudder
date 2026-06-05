@@ -3,8 +3,9 @@
 Connected repos are persisted to a JSON file on a volume (survive restart). Jobs
 are rendered from each repo's `ansible/jobs.yml` on reconcile. Inventory is
 parsed from the repo's real Ansible inventory. Private repos authenticate with a
-token stored in Vault (never in repos.json). Run history is in-memory (the
-durable record lives in Prometheus + Loki).
+token stored in Vault (never in repos.json). Run history is persisted to a JSON
+file on the same volume as repos.json so it survives restarts; Prometheus + Loki
+remain the long-term durable record.
 """
 import json
 import os
@@ -18,9 +19,10 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 import yaml
 
-from . import config, vault
+from . import config, db, vault
 
 _lock = threading.RLock()
+_migrated = False
 
 repos: dict = {}            # id -> ConnectedRepo (may carry transient "error")
 jobs: dict = {}             # name -> job (internal, with _repoId/_workdir)
@@ -45,21 +47,49 @@ _INV_CANDIDATES = [
 _INV_RE = re.compile(r"^(hosts|inventory)(\.(ini|yml|yaml))?$")
 
 
+# ── one-time migration from the legacy JSON files ──
+def _ensure_migrated():
+    """Import repos.json/runs.json into SQLite once, then retire the JSON files."""
+    global _migrated
+    with _lock:
+        if _migrated:
+            return
+        _migrated = True
+        try:
+            if db.repo_count() == 0 and os.path.exists(config.STATE_FILE):
+                imported = []
+                for r in json.load(open(config.STATE_FILE)):
+                    r.pop("error", None)
+                    imported.append(r)
+                if imported:
+                    db.set_repos(imported)
+                os.rename(config.STATE_FILE, config.STATE_FILE + ".imported")
+        except Exception as e:
+            print("store: migrate repos failed:", e)
+        try:
+            if db.run_count() == 0 and os.path.exists(config.RUNS_FILE):
+                for name, rl in (json.load(open(config.RUNS_FILE)) or {}).items():
+                    for r in reversed(rl):          # insert oldest-first so prune keeps newest
+                        db.insert_run(name, r)
+                os.rename(config.RUNS_FILE, config.RUNS_FILE + ".imported")
+        except Exception as e:
+            print("store: migrate runs failed:", e)
+
+
 # ── repos persistence ──
 def load_repos():
+    _ensure_migrated()
     try:
-        if os.path.exists(config.STATE_FILE):
-            for r in json.load(open(config.STATE_FILE)):
-                r.pop("error", None)
-                repos[r["id"]] = r
+        for r in db.all_repos():
+            r.pop("error", None)
+            repos[r["id"]] = r
     except Exception as e:
         print("store: load repos failed:", e)
 
 
 def save_repos():
     try:
-        os.makedirs(os.path.dirname(config.STATE_FILE), exist_ok=True)
-        json.dump([{k: v for k, v in r.items() if k != "error"} for r in repos.values()], open(config.STATE_FILE, "w"))
+        db.set_repos([{k: v for k, v in r.items() if k != "error"} for r in repos.values()])
     except Exception as e:
         print("store: save repos failed:", e)
 
@@ -119,6 +149,7 @@ def remove_repo(rid: str):
         for n in [n for n, j in jobs.items() if j.get("_repoId") == rid]:
             jobs.pop(n, None)
             runs.pop(n, None)
+            db.delete_job_runs(n)
         manifests.pop(rid, None)
         repo_inventory.pop(rid, None)
         _rebuild_channels()
@@ -535,11 +566,33 @@ def _parse_yaml_inventory(text: str):
     return groups_map, hostmap, hostinfo
 
 
-# ── run history ──
+# ── run history (SQLite-backed; in-memory dict is a read cache) ──
+def load_runs():
+    _ensure_migrated()
+    try:
+        runs.clear()
+        runs.update(db.all_runs())
+    except Exception as e:
+        print("store: load runs failed:", e)
+
+
 def add_run(name: str, run: dict):
     with _lock:
         runs.setdefault(name, []).insert(0, run)
-        runs[name] = runs[name][:50]
+        runs[name] = runs[name][:db.RUNS_PER_JOB]
+        db.insert_run(name, run)
+
+
+def append_run_log(name: str, run_id: str, entry: dict):
+    """Append one classified log line to a running run, so the UI's poll of
+    /jobs/{name} shows output live. One row INSERT — not a whole-file rewrite."""
+    with _lock:
+        for r in runs.get(name, []):
+            if r["id"] == run_id:
+                r.setdefault("log", []).append(entry)
+                r["log"] = r["log"][-400:]
+                break
+        db.append_log(run_id, entry)
 
 
 def replace_run(name: str, run_id: str, run: dict):
@@ -548,8 +601,10 @@ def replace_run(name: str, run_id: str, run: dict):
         for i, r in enumerate(lst):
             if r["id"] == run_id:
                 lst[i] = run
+                db.update_run(name, run)
                 return
         lst.insert(0, run)
+        db.insert_run(name, run)
 
 
 # ── views (shaped for the web-ui types) ──

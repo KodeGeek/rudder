@@ -146,6 +146,7 @@ export interface SecretRef {
   used: number;
   rotated: number;
   kind: string;
+  rotatable?: boolean;
   warn?: boolean;
 }
 

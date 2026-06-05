@@ -1,0 +1,38 @@
+apiVersion: v2
+name: rudder
+description: >-
+  Rudder — a community, single-pane control plane for fleet reconciliation:
+  a web UI, an OpenBao (Vault) secret store, Prometheus + Pushgateway metrics,
+  Loki run-logs, and a reconcile/job-runner control plane. This chart makes
+  Rudder installable on ANY Kubernetes (docker-desktop / kind / minikube,
+  AKS, EKS, GKE, OpenShift) — replacing the single-node-k3s assumptions of the
+  raw kustomize manifests.
+type: application
+
+# Chart version — bump on every change to the chart itself.
+version: 0.1.0
+# Default application version (image tag) the chart deploys.
+appVersion: "0.1.0"
+
+# Minimum Kubernetes version. Required APIs (networking.k8s.io/v1 Ingress,
+# apps/v1) are stable from 1.19+, but 1.24 is the floor we test against.
+kubeVersion: ">=1.24.0-0"
+
+keywords:
+  - rudder
+  - reconciliation
+  - ansible
+  - control-plane
+  - openbao
+  - vault
+  - prometheus
+  - loki
+  - fleet-management
+
+home: https://github.com/kodegeek/rudder
+sources:
+  - https://github.com/kodegeek/rudder
+
+maintainers:
+  - name: Rudder community
+    url: https://github.com/kodegeek/rudder

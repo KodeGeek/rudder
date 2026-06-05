@@ -1,0 +1,156 @@
+# ── Control plane — reconcile loop + job runner + API ──
+# Pulls SSH keys/secrets from Vault, renders the Git manifest → cron, runs
+# Ansible, and pushes metrics + logs. Uses the hardened Vault's published root
+# token (VAULT_TOKEN_FILE on the shared PVC) — no dev-mode Secret.
+{{- if and (not .Values.controlPlane.apiKey.existingSecret) .Values.controlPlane.apiKey.value }}
+# API-key Secret — created only when controlPlane.apiKey.value is set AND no
+# existingSecret was provided. Holds RUDDER_API_KEY for the control-plane API.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "rudder.fullname" . }}-api-key
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: control-plane
+type: Opaque
+stringData:
+  RUDDER_API_KEY: {{ .Values.controlPlane.apiKey.value | quote }}
+---
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cp-work               # repo registrations (repos.json) + cloned repos + run state
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: control-plane
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.cpWork }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: control-plane
+spec:
+  # >1 requires the M5 datastore work: the pod shares the RWO vault-shared and
+  # cp-work PVCs and keeps run state on disk. Recreate (not RollingUpdate) is
+  # mandatory so the old pod releases the RWO volumes before the new one mounts.
+  replicas: {{ .Values.controlPlane.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: control-plane
+      {{- include "rudder.selectorLabels" . | nindent 6 }}
+  strategy: { type: Recreate }     # shares the RWO vault-shared PVC with the vault pod
+  template:
+    metadata:
+      labels:
+        {{- include "rudder.labels" . | nindent 8 }}
+        app.kubernetes.io/name: control-plane
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 40    # let in-flight runs drain on SIGTERM
+      containers:
+        - name: control-plane
+          image: {{ include "rudder.image" (dict "root" $ "component" .Values.controlPlane) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 8090
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "3"] }
+          env:
+            - name: VAULT_ADDR
+              value: "http://vault:8200"
+            - name: VAULT_TOKEN_FILE          # root token published by the unseal sidecar
+              value: "/vault-shared/root-token"
+            - name: VAULT_KV_MOUNT
+              value: "secret"
+            - name: PUSHGATEWAY_URL
+              value: "http://pushgateway:9091"
+            - name: LOKI_URL
+              value: "http://loki:3100"
+            - name: GITEA_SEED                 # no bundled Gitea on k8s; skip demo seeding
+              value: "false"
+            - name: RECONCILE_INTERVAL
+              value: {{ .Values.controlPlane.reconcileInterval | quote }}
+            - name: RUN_WORKERS
+              value: {{ .Values.controlPlane.runWorkers | quote }}
+            - name: SSH_STRICT
+              value: {{ .Values.controlPlane.sshStrict | quote }}
+            {{- if .Values.controlPlane.apiKey.existingSecret }}
+            - name: RUDDER_API_KEY            # auth key from a pre-existing Secret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controlPlane.apiKey.existingSecret }}
+                  key: {{ .Values.controlPlane.apiKey.existingSecretKey }}
+            {{- else if .Values.controlPlane.apiKey.value }}
+            - name: RUDDER_API_KEY            # auth key from the chart-managed Secret
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rudder.fullname" . }}-api-key
+                  key: RUDDER_API_KEY
+            {{- end }}
+          startupProbe:                          # allow slow first boot (Vault unseal)
+            httpGet: { path: /readyz, port: 8090 }
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8090 }
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8090 }
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - { name: vault-shared, mountPath: /vault-shared, readOnly: true }
+            - { name: cp-work, mountPath: /app/work }
+            {{- if .Values.controlPlane.hostStats.enabled }}
+            # Read-only host /proc + root fs so /host-stats reports the node's
+            # CPU/memory/disk for the Overview dashboard. Single-node only; may
+            # be blocked by PodSecurity / SCC on managed clusters.
+            - { name: host-proc, mountPath: /host/proc, readOnly: true }
+            - { name: host-root, mountPath: /host/root, readOnly: true }
+            {{- end }}
+          resources:
+            {{- toYaml .Values.controlPlane.resources | nindent 12 }}
+      volumes:
+        - name: vault-shared
+          persistentVolumeClaim: { claimName: vault-shared }
+        - name: cp-work
+          persistentVolumeClaim: { claimName: cp-work }
+        {{- if .Values.controlPlane.hostStats.enabled }}
+        - name: host-proc
+          hostPath: { path: /proc }
+        - name: host-root
+          hostPath: { path: / }
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: control-plane
+spec:
+  selector:
+    app.kubernetes.io/name: control-plane
+  ports:
+    - port: 8090
+      targetPort: 8090

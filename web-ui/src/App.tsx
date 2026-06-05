@@ -12,6 +12,8 @@ import { JobDetailScreen } from "./screens/JobDetail";
 import { ManifestScreen } from "./screens/Manifest";
 import { ActivityScreen, InventoryScreen } from "./screens/Activity";
 import { SettingsScreen, ConnectScreen, CredentialsScreen } from "./screens/Settings";
+import { LoginScreen } from "./screens/Login";
+import { getToken } from "./lib/api";
 
 type Theme = "dark" | "light";
 type NavItem = { k: string; label: string; icon: IconFn };
@@ -76,8 +78,12 @@ export function App() {
     if (main) main.scrollTop = 0;
   };
 
+  // Mid-session 401 (e.g. key rotated): drop back to the login screen.
+  if (data.unauthorized) return <LoginScreen onSuccess={data.refresh} />;
+
   const failing = data.jobs.filter((j) => j.status === "fail").length;
   const running = data.jobs.filter((j) => j.status === "running").length;
+  const signedIn = !!getToken();
 
   let screen: React.ReactNode;
   const p = route.params;
@@ -164,8 +170,12 @@ export function App() {
               <StatusDot s="running" size={6} /> {running} running
             </span>
           )}
+          {data.role === "viewer" && (
+            <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", padding: "4px 9px", borderRadius: 99, background: "var(--surface-3)" }}>read-only</span>
+          )}
           <IconBtn icon={theme === "dark" ? Icons.sun : Icons.moon} title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} />
-          <Btn kind="solid" size="sm" icon={Icons.refresh} onClick={() => data.reconcileNow()}>Reconcile now</Btn>
+          {signedIn && <IconBtn icon={Icons.key} title="Sign out" onClick={() => data.signOut()} />}
+          {data.canWrite && <Btn kind="solid" size="sm" icon={Icons.refresh} onClick={() => data.reconcileNow()}>Reconcile now</Btn>}
         </header>
 
         <main id="rudder-main" style={{ flex: 1, overflow: "auto" }}>{screen}</main>

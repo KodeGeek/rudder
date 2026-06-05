@@ -1,0 +1,14 @@
+# Red Hat OpenShift.
+#   helm install rudder deploy/helm/rudder -n rudder --create-namespace \
+#     -f deploy/helm/rudder/ci/values-openshift.yaml \
+#     --set controlPlane.apiKey.value=$(openssl rand -hex 24)
+# Expose via a Route after install:
+#   oc expose service/web-ui
+persistence:
+  storageClassName: ""                 # use the cluster default SC
+webUi:
+  service:
+    type: ClusterIP                    # front with an OpenShift Route, not NodePort/LB
+controlPlane:
+  hostStats:
+    enabled: false                     # hostPath /proc and / violate the default restricted SCC

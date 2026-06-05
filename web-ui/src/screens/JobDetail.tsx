@@ -1,7 +1,7 @@
 /* Rudder — Job detail + log drill-down (the workhorse). Live-fetched. */
 import React from "react";
 import { Card, Btn, StatusDot, StatusPill, Sparkline, KindTag, st } from "../components/ui";
-import { LogViewer, RunTimeline } from "../components/composite";
+import { LogViewer, PlaybookViewer, RunTimeline } from "../components/composite";
 import { Icons } from "../components/icons";
 import { EmptyState } from "../components/EmptyState";
 import { relTime, clockTime, fullStamp, dur, cronHuman } from "../lib/format";
@@ -20,6 +20,28 @@ function Stat({ label, value, sub, color }:
   );
 }
 
+function Toggle({ value, onChange }: { value: "run" | "playbook"; onChange: (v: "run" | "playbook") => void }) {
+  const opts: { k: "run" | "playbook"; label: string; icon: typeof Icons.terminal }[] = [
+    { k: "run", label: "Live run", icon: Icons.terminal },
+    { k: "playbook", label: "Playbook", icon: Icons.doc },
+  ];
+  return (
+    <div style={{ display: "inline-flex", background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--r-md)", padding: 2 }}>
+      {opts.map((o) => {
+        const active = value === o.k;
+        return (
+          <button key={o.k} onClick={() => onChange(o.k)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 11px", borderRadius: "calc(var(--r-md) - 2px)", border: "none",
+              background: active ? "var(--surface)" : "transparent", color: active ? "var(--text)" : "var(--text-3)",
+              fontSize: "var(--fs-sm)", fontWeight: active ? 600 : 500, cursor: "pointer" }}>
+            <o.icon size={14} style={{ color: active ? "var(--accent-text)" : "inherit" }} /> {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Meta({ k, v, color }: { k: React.ReactNode; v: React.ReactNode; color?: string }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -30,10 +52,20 @@ function Meta({ k, v, color }: { k: React.ReactNode; v: React.ReactNode; color?:
 }
 
 export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
-  const { runJob } = useData();
+  const { runJob, canWrite } = useData();
   const [job, setJob] = React.useState<Job | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [sel, setSel] = React.useState<string | undefined>(undefined);
+  const [view, setView] = React.useState<"run" | "playbook">("run");
+  const [pb, setPb] = React.useState<{ path: string; content: string; found: boolean } | null>(null);
+  const [pbLoading, setPbLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (view !== "playbook" || pb) return;
+    setPbLoading(true);
+    api.playbook(name).then(setPb).catch(() => setPb({ path: "", content: "", found: false }))
+      .finally(() => setPbLoading(false));
+  }, [view, pb, name]);
 
   const load = React.useCallback(async () => {
     try {
@@ -67,6 +99,12 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
   const rate = job.successRate ?? 0;
 
   const onRun = async () => { await runJob(name); setTimeout(load, 1500); };
+  const onStop = async () => {
+    const r = runs.find((x) => x.status === "running");
+    if (!r) return;
+    try { await api.stopRun(name, r.id); } catch { /* ignore */ }
+    setTimeout(load, 1000);
+  };
 
   return (
     <div style={{ maxWidth: 1320, margin: "0 auto", padding: "20px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
@@ -94,7 +132,9 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
         </div>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           <Btn kind="solid" icon={Icons.doc} onClick={() => nav("manifest")}>Manifest</Btn>
-          <Btn kind="primary" icon={Icons.play} disabled={isRunning} onClick={onRun}>{isRunning ? "Running…" : "Run now"}</Btn>
+          {canWrite && (isRunning
+            ? <Btn kind="solid" icon={Icons.x} onClick={onStop}>Stop</Btn>
+            : <Btn kind="primary" icon={Icons.play} onClick={onRun}>Run now</Btn>)}
         </div>
       </div>
 
@@ -127,19 +167,26 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
         </Card>
 
         <div>
-          {selected ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "0 4px 12px", flexWrap: "wrap" }}>
-              <StatusPill s={selected.status} />
-              <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-2)" }}>{selected.streaming ? "Live run" : fullStamp(selected.at)}</span>
-              <span style={{ flex: 1 }} />
-              <Meta k="host" v={selected.host} />
-              <Meta k="duration" v={dur(selected.duration)} />
-              <Meta k="exit" v={selected.exit ?? "—"} color={selected.exit ? "var(--fail)" : selected.exit === 0 ? "var(--ok)" : undefined} />
-            </div>
-          ) : (
-            <div style={{ padding: "0 4px 12px", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>No runs yet.</div>
-          )}
-          <LogViewer run={selected} job={job} height={448} />
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "0 4px 12px", flexWrap: "wrap" }}>
+            <Toggle value={view} onChange={setView} />
+            {view === "run" && selected && (
+              <>
+                <StatusPill s={selected.status} />
+                <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-2)" }}>{selected.streaming ? "Live run" : fullStamp(selected.at)}</span>
+              </>
+            )}
+            <span style={{ flex: 1 }} />
+            {view === "run" && selected && (
+              <>
+                <Meta k="host" v={selected.host} />
+                <Meta k="duration" v={dur(selected.duration)} />
+                <Meta k="exit" v={selected.exit ?? "—"} color={selected.exit ? "var(--fail)" : selected.exit === 0 ? "var(--ok)" : undefined} />
+              </>
+            )}
+          </div>
+          {view === "run"
+            ? <LogViewer run={selected} job={job} height={448} />
+            : <PlaybookViewer path={pb?.path || job.playbook} content={pb?.content || ""} found={!!pb?.found} loading={pbLoading} height={448} />}
         </div>
       </div>
     </div>

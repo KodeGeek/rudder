@@ -26,7 +26,7 @@ spec:
     spec:
       containers:
         - name: loki
-          image: grafana/loki:latest
+          image: grafana/loki@sha256:191d4fdfb7264f16989f0a57f320872620a5a7c2ceeec6229212c4190ec49b86
           args: ["-config.file=/etc/loki/local-config.yaml"]
           ports:
             - containerPort: 3100

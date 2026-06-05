@@ -117,7 +117,7 @@ spec:
     spec:
       containers:
         - name: vault
-          image: openbao/openbao:latest
+          image: openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
           args: ["server", "-config=/openbao/config/config.hcl"]
           securityContext:
             capabilities:
@@ -138,7 +138,7 @@ spec:
             limits:   { cpu: "500m", memory: "256Mi" }
         # ── auto-unseal sidecar: init once, publish root token, keep unsealed ──
         - name: vault-unseal
-          image: openbao/openbao:latest
+          image: openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
           command: ["/bin/sh", "/unseal.sh"]
           env:
             - name: BAO_ADDR

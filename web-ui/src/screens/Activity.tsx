@@ -6,7 +6,37 @@ import { EmptyState } from "../components/EmptyState";
 import { relTime, clockTime, dur } from "../lib/format";
 import { DAY } from "../data/mock";
 import { useData } from "../lib/data";
+import { api, type AuditEntry } from "../lib/api";
 import type { ActivityItem, NavFn, RouteParams } from "../data/types";
+
+function AuditPanel() {
+  const [rows, setRows] = React.useState<AuditEntry[] | null>(null);
+  React.useEffect(() => { api.audit().then(setRows).catch(() => setRows([])); }, []);
+  if (!rows) return null;
+  return (
+    <Card pad={false} style={{ marginTop: 22 }}>
+      <div style={{ padding: "13px 16px 11px", display: "flex", alignItems: "center", gap: 9, borderBottom: "1px solid var(--line-soft)" }}>
+        <Icons.key size={15} style={{ color: "var(--text-3)" }} />
+        <span style={{ fontSize: "var(--fs-md)", fontWeight: 600 }}>Audit log</span>
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>admin · who changed what</span>
+      </div>
+      {rows.length === 0
+        ? <div style={{ padding: "18px 16px", fontSize: "var(--fs-sm)", color: "var(--text-3)" }}>No mutating actions recorded yet.</div>
+        : rows.slice(0, 50).map((a, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "150px 1fr auto", gap: 12, alignItems: "center", padding: "9px 16px", borderTop: i ? "1px solid var(--line-soft)" : "none" }}>
+            <span className="mono" style={{ fontSize: 12, color: "var(--accent-text)" }}>{a.action}</span>
+            <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: "var(--text)" }}>{a.principal}</span>
+              {a.role && <span style={{ color: "var(--text-faint)" }}> ({a.role})</span>}
+              {a.target && <span className="mono" style={{ color: "var(--text-3)" }}> → {a.target}</span>}
+              {a.source_ip && <span style={{ color: "var(--text-faint)" }}> · {a.source_ip}</span>}
+            </span>
+            <span style={{ fontSize: 11.5, color: "var(--text-faint)", whiteSpace: "nowrap" }}>{relTime(a.at)}</span>
+          </div>
+        ))}
+    </Card>
+  );
+}
 
 const AFILT = [
   { k: "all", label: "All runs" },
@@ -23,7 +53,7 @@ function dayBucket(ts: number): string {
 }
 
 export function ActivityScreen({ nav, params }: { nav: NavFn; params: RouteParams }) {
-  const { activity, jobs, repos, loading } = useData();
+  const { activity, jobs, repos, loading, isAdmin } = useData();
   const [filter, setFilter] = React.useState<string>(params.filter || "all");
   const [job, setJob] = React.useState("all");
 
@@ -101,6 +131,7 @@ export function ActivityScreen({ nav, params }: { nav: NavFn; params: RouteParam
         </div>
       ))}
       {items.length === 0 && <Card style={{ textAlign: "center", color: "var(--text-3)", padding: 40 }}>No activity matches these filters.</Card>}
+      {isAdmin && <AuditPanel />}
     </div>
   );
 }

@@ -4,6 +4,19 @@ dist/
 web-ui/dist/
 *.tsbuildinfo
 
+# ── python / test artifacts ──
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# ── control-plane runtime state (created on the work volume at runtime) ──
+*.db
+*.db-wal
+*.db-shm
+known_hosts
+*.imported
+
 # ── secrets & local env — NEVER commit (only .env.example is tracked) ──
 .env
 .env.*
@@ -16,3 +29,4 @@ npm-debug.log*
 .DS_Store
 .idea/
 .vscode/
+.devcontainer/

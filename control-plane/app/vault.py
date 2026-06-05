@@ -56,6 +56,15 @@ def wait_ready(timeout: int = 90) -> bool:
     return False
 
 
+def is_up() -> bool:
+    """Cheap reachability/unseal check for /metrics and /readyz."""
+    try:
+        c = client()
+        return bool(c.sys.is_initialized()) and not c.sys.is_sealed()
+    except Exception:
+        return False
+
+
 def _kv_read(path: str):
     try:
         r = client().secrets.kv.v2.read_secret_version(
@@ -72,11 +81,7 @@ def _kv_write(path: str, data: dict):
     )
 
 
-def ensure_ssh_key() -> dict:
-    """Generate an ed25519 keypair in Vault if absent; return {private, public}."""
-    existing = _kv_read(config.SSH_KEY_VAULT_PATH)
-    if existing and existing.get("private") and existing.get("public"):
-        return existing
+def _generate_ssh_key() -> dict:
     d = tempfile.mkdtemp()
     kf = os.path.join(d, "id")
     subprocess.run(
@@ -85,12 +90,28 @@ def ensure_ssh_key() -> dict:
     )
     priv = open(kf).read()
     pub = open(kf + ".pub").read().strip()
-    _kv_write(config.SSH_KEY_VAULT_PATH, {"private": priv, "public": pub})
+    data = {"private": priv, "public": pub, "rotated": int(time.time() * 1000)}
+    _kv_write(config.SSH_KEY_VAULT_PATH, data)
     try:
         os.remove(kf); os.remove(kf + ".pub"); os.rmdir(d)
     except OSError:
         pass
-    return {"private": priv, "public": pub}
+    return data
+
+
+def ensure_ssh_key() -> dict:
+    """Generate an ed25519 keypair in Vault if absent; return {private, public}."""
+    existing = _kv_read(config.SSH_KEY_VAULT_PATH)
+    if existing and existing.get("private") and existing.get("public"):
+        return existing
+    return _generate_ssh_key()
+
+
+def rotate_ssh_key() -> dict:
+    """Replace the bundled run SSH key with a fresh one. Returns the new public key
+    + rotation timestamp (private never leaves Vault)."""
+    data = _generate_ssh_key()
+    return {"public": data["public"], "rotated": data["rotated"]}
 
 
 def public_key() -> str:
@@ -280,7 +301,8 @@ def list_secret_refs() -> list:
         out.append({
             "ref": f"vault/{n}",
             "used": 0,
-            "rotated": int(time.time() * 1000),
+            "rotated": data.get("rotated") or 0,   # real timestamp once rotated
             "kind": kind,
+            "rotatable": kind == "ssh-key",         # only the Rudder-managed key auto-rotates
         })
     return out

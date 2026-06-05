@@ -27,12 +27,16 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: control-plane }
     spec:
+      terminationGracePeriodSeconds: 40    # let in-flight runs drain on SIGTERM
       containers:
         - name: control-plane
           image: rudder-control-plane:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8090
+          lifecycle:
+            preStop:
+              exec: { command: ["sleep", "3"] }   # stop taking traffic before SIGTERM
           env:
             - name: VAULT_ADDR
               value: "http://vault:8200"
@@ -48,13 +52,36 @@ spec:
               value: "false"
             - name: RECONCILE_INTERVAL
               value: "15m"
+            # Auth is OFF by default (open). To turn it on, create the `rudder-api`
+            # Secret out-of-band (values never in git); these optional refs then
+            # enable shared-key auth + RBAC. Absent secret ⇒ open fallback.
+            #   kubectl -n rudder create secret generic rudder-api \
+            #     --from-literal=RUDDER_API_KEY=$(openssl rand -hex 24) \
+            #     --from-literal=RUDDER_API_KEYS="<opkey>:operator,<viewkey>:viewer"
+            - name: RUDDER_API_KEY
+              valueFrom:
+                secretKeyRef: { name: rudder-api, key: RUDDER_API_KEY, optional: true }
+            - name: RUDDER_API_KEYS
+              valueFrom:
+                secretKeyRef: { name: rudder-api, key: RUDDER_API_KEYS, optional: true }
+          startupProbe:                          # allow slow first boot (Vault unseal)
+            httpGet: { path: /readyz, port: 8090 }
+            periodSeconds: 5
+            failureThreshold: 36                 # up to 3 min to become ready
           readinessProbe:
-            httpGet: { path: /healthz, port: 8090 }
-            initialDelaySeconds: 5
+            httpGet: { path: /readyz, port: 8090 }
             periodSeconds: 15
+          livenessProbe:                         # restart only if the process is wedged
+            httpGet: { path: /healthz, port: 8090 }
+            periodSeconds: 20
+            failureThreshold: 3
           volumeMounts:
             - { name: vault-shared, mountPath: /vault-shared, readOnly: true }
             - { name: cp-work, mountPath: /app/work }
+            # Read-only host /proc + root fs so /host-stats reports node (host20)
+            # CPU/memory/disk for the Overview dashboard.
+            - { name: host-proc, mountPath: /host/proc, readOnly: true }
+            - { name: host-root, mountPath: /host/root, readOnly: true }
           resources:
             requests: { cpu: "50m", memory: "128Mi" }
             limits:   { cpu: "1", memory: "512Mi" }
@@ -63,6 +90,10 @@ spec:
           persistentVolumeClaim: { claimName: vault-shared }
         - name: cp-work
           persistentVolumeClaim: { claimName: cp-work }
+        - name: host-proc
+          hostPath: { path: /proc }
+        - name: host-root
+          hostPath: { path: / }
 ---
 apiVersion: v1
 kind: Service

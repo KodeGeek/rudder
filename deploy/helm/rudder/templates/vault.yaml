@@ -1,0 +1,193 @@
+# ── Vault (OpenBao) — SSH keys + encrypted secrets for Ansible auth ──
+# HARDENED (parity with the compose stack): file storage = secrets encrypted at
+# rest and PERSISTED across restarts, with an auto-unseal sidecar that
+# initializes Vault once and keeps it unsealed. No dev-mode, no token committed.
+#
+# The root token the sidecar publishes lives on the `vault-shared` PVC and is
+# read by the control-plane (VAULT_TOKEN_FILE) — never in a Secret or in git.
+# The vault pod and control-plane pod share the RWO `vault-shared` PVC; on a
+# multi-node cluster this requires them to co-schedule (single-node, or pin both
+# with affinity). See controlPlane notes for the M5 datastore work.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-files
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: vault
+data:
+  # Mirrors the compose stack's vault/config.hcl — file storage, encrypted at
+  # rest, persisted across restarts. TLS off (front with a reverse proxy).
+  config.hcl: |
+    storage "file" {
+      path = "/openbao/file"
+    }
+
+    listener "tcp" {
+      address     = "0.0.0.0:8200"
+      tls_disable = "true"
+    }
+
+    api_addr      = "http://vault:8200"
+    disable_mlock = true
+    ui            = false
+  # Mirrors the compose stack's vault/unseal.sh — init once, publish the root
+  # token to /vault-shared/root-token, keep Vault unsealed, enable kv-v2.
+  unseal.sh: |
+    #!/bin/sh
+    export BAO_ADDR="${BAO_ADDR:-http://vault:8200}"
+    KEYS=/vault-shared/init.txt
+    TOKEN=/vault-shared/root-token
+
+    log() { echo "vault-unseal: $*"; }
+    is_up()          { bao status >/dev/null 2>&1 || [ $? -eq 2 ]; }
+    is_initialized() { bao status 2>/dev/null | grep -qiE '^Initialized[[:space:]]+true'; }
+    is_sealed()      { bao status 2>/dev/null | grep -qiE '^Sealed[[:space:]]+true'; }
+
+    i=0
+    while ! is_up; do
+      i=$((i + 1)); [ "$i" -gt 60 ] && { log "vault API never came up"; exit 1; }
+      log "waiting for vault API…"; sleep 2
+    done
+
+    if ! is_initialized; then
+      log "initializing vault (1 unseal key)…"
+      bao operator init -key-shares=1 -key-threshold=1 > "$KEYS" 2>/dev/null
+      chmod 600 "$KEYS"
+    fi
+
+    KEY=$(grep -i 'Unseal Key 1:' "$KEYS" | awk '{print $NF}')
+    ROOT=$(grep -i 'Initial Root Token:' "$KEYS" | awk '{print $NF}')
+    printf '%s' "$ROOT" > "$TOKEN"
+    chmod 600 "$TOKEN"
+    [ -n "$KEY" ] || { log "no unseal key found in $KEYS — aborting"; exit 1; }
+
+    n=0
+    while is_sealed && [ "$n" -lt 15 ]; do bao operator unseal "$KEY" >/dev/null 2>&1; n=$((n + 1)); sleep 1; done
+
+    export BAO_TOKEN="$ROOT"
+    if ! bao secrets list 2>/dev/null | grep -qE '^secret/'; then
+      log "enabling kv-v2 at secret/"
+      bao secrets enable -path=secret kv-v2 >/dev/null 2>&1 || log "kv-v2 enable failed"
+    fi
+
+    log "ready — root token published to $TOKEN; keeping vault unsealed"
+    while true; do
+      if is_sealed; then
+        log "vault is sealed → unsealing"
+        bao operator unseal "$KEY" >/dev/null 2>&1 || log "unseal attempt failed"
+      fi
+      sleep 10
+    done
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vault-data
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: vault
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.vaultData }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vault-shared          # unseal key + root token (written by the sidecar)
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: vault
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.persistence.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.vaultShared }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: vault
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+      {{- include "rudder.selectorLabels" . | nindent 6 }}
+  strategy: { type: Recreate }
+  template:
+    metadata:
+      labels:
+        {{- include "rudder.labels" . | nindent 8 }}
+        app.kubernetes.io/name: vault
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: vault
+          image: {{ .Values.vault.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["server", "-config=/openbao/config/config.hcl"]
+          securityContext:
+            capabilities:
+              add: ["IPC_LOCK"]
+          ports:
+            - containerPort: 8200
+          readinessProbe:
+            # default health → 200 only once initialized AND unsealed, so the
+            # pod goes Ready after the sidecar unseals it.
+            httpGet: { path: /v1/sys/health, port: 8200 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - { name: data, mountPath: /openbao/file }
+            - { name: vault-files, mountPath: /openbao/config/config.hcl, subPath: config.hcl }
+          resources:
+            {{- toYaml .Values.vault.resources | nindent 12 }}
+        # ── auto-unseal sidecar: init once, publish root token, keep unsealed ──
+        - name: vault-unseal
+          image: {{ .Values.vault.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "/unseal.sh"]
+          env:
+            - name: BAO_ADDR
+              value: "http://127.0.0.1:8200"
+          volumeMounts:
+            - { name: vault-shared, mountPath: /vault-shared }
+            - { name: vault-files, mountPath: /unseal.sh, subPath: unseal.sh }
+          resources:
+            {{- toYaml .Values.vault.unsealResources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: vault-data }
+        - name: vault-shared
+          persistentVolumeClaim: { claimName: vault-shared }
+        - name: vault-files
+          configMap: { name: vault-files }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  labels:
+    {{- include "rudder.labels" . | nindent 4 }}
+    app.kubernetes.io/name: vault
+spec:
+  selector:
+    app.kubernetes.io/name: vault
+  ports:
+    - port: 8200
+      targetPort: 8200

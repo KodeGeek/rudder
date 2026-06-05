@@ -6,6 +6,16 @@ def env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+# ── API auth ──
+# Shared API key guarding all endpoints. When unset (and RUDDER_API_KEYS empty),
+# the API is open (localhost / community fallback) — set this (from a Secret) for
+# any non-localhost exposure. RUDDER_API_KEY is treated as an admin key.
+API_KEY = env("RUDDER_API_KEY", "")
+# Optional RBAC: comma-separated "key:role" pairs, role in {admin,operator,viewer}.
+# e.g. RUDDER_API_KEYS="k1:admin,k2:operator,k3:viewer". Real SSO/OIDC is delegated
+# to an authenticating reverse proxy, whose identity header is used for attribution.
+API_KEYS = env("RUDDER_API_KEYS", "")
+
 # ── Vault (OpenBao) ──
 VAULT_ADDR = env("VAULT_ADDR", "http://vault:8200")
 VAULT_TOKEN = env("VAULT_TOKEN", "")
@@ -28,13 +38,26 @@ GITEA_REPO = env("GITEA_REPO", "fleet")
 GITEA_SEED = env("GITEA_SEED", "true").lower() == "true"
 BUNDLED_REPO_URL = env("BUNDLED_REPO_URL", f"{GITEA_URL}/{GITEA_ORG}/{GITEA_REPO}.git")
 
+# ── SSH host-key trust ──
+# Persisted known_hosts on the work volume. Default policy is trust-on-first-use
+# (accept-new): unknown hosts are pinned on first contact, but a later key change
+# (MITM) is rejected. SSH_STRICT=true requires hosts to be pre-populated.
+SSH_KNOWN_HOSTS = env("SSH_KNOWN_HOSTS", "/app/work/known_hosts")
+SSH_STRICT = env("SSH_STRICT", "false").lower() == "true"
+
 # ── Ansible run target (bundled sshd container) ──
 TARGET_HOST = env("TARGET_HOST", "target")
 TARGET_USER = env("TARGET_USER", "rudder")
 TARGET_PORT = env("TARGET_PORT", "22")
 
+# ── Run execution (bounded worker pool + backpressure) ──
+RUN_WORKERS = int(env("RUN_WORKERS", "4"))        # concurrent playbook runs
+RUN_QUEUE_MAX = int(env("RUN_QUEUE_MAX", "20"))   # total in-flight (running+queued) before 429
+
 # ── Reconcile + state ──
 RECONCILE_INTERVAL = env("RECONCILE_INTERVAL", "2m")
 WORKDIR = env("WORKDIR", "/app/work")
 STATE_FILE = env("STATE_FILE", "/app/work/repos.json")
+RUNS_FILE = env("RUNS_FILE", "/app/work/runs.json")
+DB_FILE = env("DB_FILE", "/app/work/rudder.db")
 SEED_DIR = env("SEED_DIR", "/app/seed")

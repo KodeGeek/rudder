@@ -1,0 +1,12 @@
+# Google GKE.
+#   helm install rudder deploy/helm/rudder -n rudder --create-namespace \
+#     -f deploy/helm/rudder/ci/values-gke.yaml \
+#     --set controlPlane.apiKey.value=$(openssl rand -hex 24)
+persistence:
+  storageClassName: premium-rwo        # Balanced PD = standard-rwo
+webUi:
+  service:
+    type: LoadBalancer                 # GCP LB; or ingress.enabled with GCE ingress
+controlPlane:
+  hostStats:
+    enabled: false
