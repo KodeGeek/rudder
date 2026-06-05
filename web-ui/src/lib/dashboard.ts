@@ -103,7 +103,10 @@ export function clearDraft(repoId: string): void {
   try { localStorage.removeItem(draftKey(repoId)); } catch { /* ignore */ }
 }
 
-// Compare two layouts by their committed shape (ignores ids) — used to decide
-// whether the local draft actually differs from what's in Git.
+// Compare two layouts by their committed shape — used to decide whether the
+// local draft actually differs from what's in Git. Both sides go through
+// stripIds so the comparison is canonical: same sort order, same field set, and
+// same key order (the server emits `metric` last, stripIds emits it second — so
+// comparing raw JSON would mark any metric widget permanently "different").
 export const sameLayout = (a: WidgetItem[], b: WidgetSpec[]): boolean =>
-  JSON.stringify(stripIds(a)) === JSON.stringify([...b].sort((p, q) => p.y - q.y || p.x - q.x));
+  JSON.stringify(stripIds(a)) === JSON.stringify(stripIds(b as WidgetItem[]));
