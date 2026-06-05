@@ -570,8 +570,10 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
       {/* toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, position: "relative" }}>
         {dirty && !edit && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: "var(--fs-xs)", color: "var(--warn)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: "var(--fs-xs)", color: "var(--warn)" }}>
             <Icons.drift size={14} /> Local draft — not committed
+            <Btn size="sm" kind="bare" icon={Icons.copy} onClick={() => { setYamlOpen(true); setCopied(false); }}>Copy YAML</Btn>
+            <Btn size="sm" kind="bare" onClick={reset} title="Discard local changes and revert to the committed layout">Discard</Btn>
           </span>
         )}
         <span style={{ flex: 1 }} />
