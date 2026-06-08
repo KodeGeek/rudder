@@ -116,7 +116,7 @@ def _boot():
     reconcile_all()
     scheduler.add_job(reconcile_all, "interval", seconds=_interval_seconds(config.RECONCILE_INTERVAL),
                       id="reconcile", replace_existing=True)
-    scheduler.add_job(store.probe_inventory, "interval", seconds=60,
+    scheduler.add_job(store.probe_inventory, "interval", seconds=config.HOST_PROBE_INTERVAL,
                       id="reachability", replace_existing=True, max_instances=1, coalesce=True)
     _booted["ok"] = True
     print("main: control-plane booted")

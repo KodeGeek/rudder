@@ -452,15 +452,23 @@ def _parse_inventory(rid: str, wd: str):
 
 
 # ── host reachability (real up/down for the Inventory screen) ──
-def _probe_one(addr: str, port: int, timeout: float = 2.0) -> bool:
+def _probe_one(addr: str, port: int, timeout: float = None, attempts: int = None) -> bool:
     """A host is 'up' if we can open a TCP connection to its SSH/management port —
     the signal that actually matters for an Ansible control node (ICMP is often
-    firewalled and needs extra privileges in a container)."""
-    try:
-        with socket.create_connection((addr, port), timeout=timeout):
-            return True
-    except Exception:
-        return False
+    firewalled and needs extra privileges in a container).
+
+    Retries a couple of times before giving up so a single dropped/slow connect
+    (network jitter, a momentarily busy host) doesn't read as 'down'."""
+    timeout = config.HOST_PROBE_TIMEOUT if timeout is None else timeout
+    attempts = config.HOST_PROBE_ATTEMPTS if attempts is None else attempts
+    for i in range(max(1, attempts)):
+        try:
+            with socket.create_connection((addr, port), timeout=timeout):
+                return True
+        except Exception:
+            if i + 1 < attempts:
+                time.sleep(0.3)
+    return False
 
 
 def probe_inventory():
@@ -484,7 +492,14 @@ def probe_inventory():
     with _lock:
         for h, up in results:
             prev = host_reach.get(h) or {}
-            host_reach[h] = {"up": up, "lastSeen": now if up else prev.get("lastSeen")}
+            if up:
+                host_reach[h] = {"up": True, "lastSeen": now, "fails": 0}
+            else:
+                # Hysteresis: keep a host 'up' until it fails HOST_DOWN_AFTER probes
+                # in a row, so one transient miss can't flap it to disconnected.
+                fails = int(prev.get("fails", 0)) + 1
+                still_up = bool(prev.get("up", False)) and fails < config.HOST_DOWN_AFTER
+                host_reach[h] = {"up": still_up, "lastSeen": prev.get("lastSeen"), "fails": fails}
 
 
 def _parse_ini_inventory(text: str):

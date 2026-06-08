@@ -74,6 +74,15 @@ RUN_QUEUE_MAX = int(env("RUN_QUEUE_MAX", "20"))   # total in-flight (running+que
 RUN_TIMEOUT = env("RUN_TIMEOUT", "30m")
 RUN_TIMEOUT_SECONDS = _seconds(RUN_TIMEOUT, 1800)
 
+# ── Host reachability probe (Inventory up/down) ──
+# A host is "up" if a TCP connect to its SSH/management port succeeds. To stop
+# transient blips from flapping active↔disconnected: retry within a probe, and
+# only flip a previously-up host to down after several CONSECUTIVE failed probes.
+HOST_PROBE_INTERVAL = int(env("HOST_PROBE_INTERVAL", "60"))   # seconds between probe rounds
+HOST_PROBE_TIMEOUT = float(env("HOST_PROBE_TIMEOUT", "3"))    # per TCP connect attempt
+HOST_PROBE_ATTEMPTS = int(env("HOST_PROBE_ATTEMPTS", "2"))    # attempts per probe before it counts as a failure
+HOST_DOWN_AFTER = int(env("HOST_DOWN_AFTER", "3"))            # consecutive failed probes before marking down
+
 # ── Reconcile + state ──
 RECONCILE_INTERVAL = env("RECONCILE_INTERVAL", "2m")
 WORKDIR = env("WORKDIR", "/app/work")
