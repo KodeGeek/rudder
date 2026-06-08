@@ -63,6 +63,33 @@ def schedule_all():
             print(f"main: failed to schedule {name}: {e}")
 
 
+_scheduled = {"reconcile": None, "reachability": None}
+
+
+def _apply_runtime_settings():
+    """Re-apply rudder.yml `settings:` that affect the scheduler/pool when they
+    change: the reconcile + reachability intervals and the run-pool size. No-op
+    for anything unchanged."""
+    if not scheduler.running:
+        return
+    targets = {
+        "reconcile": int(store.settings["reconcileSeconds"]),
+        "reachability": int(store.settings["reachability"]["intervalSeconds"]),
+    }
+    for job_id, secs in targets.items():
+        if secs != _scheduled[job_id]:
+            try:
+                scheduler.reschedule_job(job_id, trigger="interval", seconds=secs)
+                _scheduled[job_id] = secs
+                print(f"main: {job_id} interval set to {secs}s")
+            except Exception as e:
+                print(f"main: reschedule {job_id} failed:", e)
+    try:
+        runner.apply_workers(int(store.settings["runWorkers"]))
+    except Exception as e:
+        print("main: apply run workers failed:", e)
+
+
 def reconcile_all():
     started = time.time()
     ok = True
@@ -73,9 +100,12 @@ def reconcile_all():
             ok = False
             print(f"main: reconcile failed for {rid}: {e}")
     now = int(time.time() * 1000)
+    rec_sec = int(store.settings["reconcileSeconds"])
     store.reconcile_state["lastAt"] = now
-    store.reconcile_state["nextAt"] = now + _interval_seconds(config.RECONCILE_INTERVAL) * 1000
+    store.reconcile_state["nextAt"] = now + rec_sec * 1000
+    store.reconcile_state["intervalMin"] = max(1, rec_sec // 60)
     schedule_all()
+    _apply_runtime_settings()   # apply any settings: changes from rudder.yml (intervals, workers)
     try:
         store.probe_inventory()  # refresh host up/down after a pull (also runs on its own interval)
     except Exception as e:
@@ -113,11 +143,15 @@ def _boot():
     store.load_runs()
     if not scheduler.running:
         scheduler.start()
-    reconcile_all()
-    scheduler.add_job(reconcile_all, "interval", seconds=_interval_seconds(config.RECONCILE_INTERVAL),
+    # Register the interval jobs first (at current/default settings) so the first
+    # reconcile can reschedule them to whatever rudder.yml's settings: block says.
+    scheduler.add_job(reconcile_all, "interval", seconds=int(store.settings["reconcileSeconds"]),
                       id="reconcile", replace_existing=True)
-    scheduler.add_job(store.probe_inventory, "interval", seconds=60,
+    scheduler.add_job(store.probe_inventory, "interval", seconds=int(store.settings["reachability"]["intervalSeconds"]),
                       id="reachability", replace_existing=True, max_instances=1, coalesce=True)
+    _scheduled["reconcile"] = int(store.settings["reconcileSeconds"])
+    _scheduled["reachability"] = int(store.settings["reachability"]["intervalSeconds"])
+    reconcile_all()   # loads rudder.yml settings, then re-applies intervals/pool
     _booted["ok"] = True
     print("main: control-plane booted")
 
@@ -362,6 +396,13 @@ def get_dashboard():
     """The committed Overview layout (dashboard: in rudder.yml), or widgets:null
     when none is set so the UI uses its built-in default layout."""
     return store.dashboard_view() or {"cols": 12, "widgets": None}
+
+
+@app.get("/settings")
+def get_settings():
+    """Effective operational settings — built-in defaults plus any overrides from
+    the `settings:` block in rudder.yml. Secret values are never included here."""
+    return store.settings
 
 
 class ChannelTest(BaseModel):

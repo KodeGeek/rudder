@@ -32,6 +32,24 @@ channels: list = []         # parsed from rudder.yml alerts across repos
 repo_inventory: dict = {}   # id -> {"groups":{g:[hosts]}, "hostmap":{host:group}, "hostinfo":{host:{addr,port}}}
 host_reach: dict = {}       # host name -> {"up": bool, "lastSeen": ms|None}  (live TCP reachability)
 
+# Effective operational settings. Defaults come from env/config; an optional
+# `settings:` block in rudder.yml overrides them on reconcile (GitOps config).
+# Secret VALUES never live here — only non-secret operational knobs.
+settings = {
+    "reconcileSeconds": config._seconds(config.RECONCILE_INTERVAL, 120),
+    "runWorkers": config.RUN_WORKERS,
+    "runQueueMax": config.RUN_QUEUE_MAX,
+    "runTimeoutSeconds": config.RUN_TIMEOUT_SECONDS,
+    "sshStrict": config.SSH_STRICT,
+    "reachability": {
+        "intervalSeconds": config.HOST_PROBE_INTERVAL,
+        "timeoutSeconds": config.HOST_PROBE_TIMEOUT,
+        "attempts": config.HOST_PROBE_ATTEMPTS,
+        "downAfter": config.HOST_DOWN_AFTER,
+    },
+}
+reachability = settings["reachability"]      # alias the probe reads
+
 reconcile_state = {
     "lastAt": None, "intervalMin": 2, "inSync": True, "pendingCommit": None, "nextAt": None,
 }
@@ -153,6 +171,7 @@ def remove_repo(rid: str):
         manifests.pop(rid, None)
         repo_inventory.pop(rid, None)
         _rebuild_channels()
+        _rebuild_settings()
         save_repos()
     try:
         vault.delete_repo_token(rid)
@@ -368,6 +387,7 @@ def _render_jobs(rid: str, wd: str):
         "found": found, "playbooks": _discover_playbooks(wd),
     }
     _rebuild_channels()
+    _rebuild_settings()
     with _lock:
         for n in [n for n, j in jobs.items() if j.get("_repoId") == rid]:
             jobs.pop(n, None)
@@ -452,15 +472,23 @@ def _parse_inventory(rid: str, wd: str):
 
 
 # ── host reachability (real up/down for the Inventory screen) ──
-def _probe_one(addr: str, port: int, timeout: float = 2.0) -> bool:
+def _probe_one(addr: str, port: int, timeout: float = None, attempts: int = None) -> bool:
     """A host is 'up' if we can open a TCP connection to its SSH/management port —
     the signal that actually matters for an Ansible control node (ICMP is often
-    firewalled and needs extra privileges in a container)."""
-    try:
-        with socket.create_connection((addr, port), timeout=timeout):
-            return True
-    except Exception:
-        return False
+    firewalled and needs extra privileges in a container).
+
+    Retries a couple of times before giving up so a single dropped/slow connect
+    (network jitter, a momentarily busy host) doesn't read as 'down'."""
+    timeout = reachability["timeoutSeconds"] if timeout is None else timeout
+    attempts = reachability["attempts"] if attempts is None else attempts
+    for i in range(max(1, attempts)):
+        try:
+            with socket.create_connection((addr, port), timeout=timeout):
+                return True
+        except Exception:
+            if i + 1 < attempts:
+                time.sleep(0.3)
+    return False
 
 
 def probe_inventory():
@@ -484,7 +512,14 @@ def probe_inventory():
     with _lock:
         for h, up in results:
             prev = host_reach.get(h) or {}
-            host_reach[h] = {"up": up, "lastSeen": now if up else prev.get("lastSeen")}
+            if up:
+                host_reach[h] = {"up": True, "lastSeen": now, "fails": 0}
+            else:
+                # Hysteresis: keep a host 'up' until it fails HOST_DOWN_AFTER probes
+                # in a row, so one transient miss can't flap it to disconnected.
+                fails = int(prev.get("fails", 0)) + 1
+                still_up = bool(prev.get("up", False)) and fails < reachability["downAfter"]
+                host_reach[h] = {"up": still_up, "lastSeen": prev.get("lastSeen"), "fails": fails}
 
 
 def _parse_ini_inventory(text: str):
@@ -713,6 +748,64 @@ def _rebuild_channels():
                         "on": a.get("on") or [], "enabled": True})
     global channels
     channels = out
+
+
+def _defaults() -> dict:
+    """The built-in defaults (from env/config) the rudder.yml `settings:` overrides."""
+    return {
+        "reconcileSeconds": config._seconds(config.RECONCILE_INTERVAL, 120),
+        "runWorkers": config.RUN_WORKERS,
+        "runQueueMax": config.RUN_QUEUE_MAX,
+        "runTimeoutSeconds": config.RUN_TIMEOUT_SECONDS,
+        "sshStrict": config.SSH_STRICT,
+        "reachability": {
+            "intervalSeconds": config.HOST_PROBE_INTERVAL,
+            "timeoutSeconds": config.HOST_PROBE_TIMEOUT,
+            "attempts": config.HOST_PROBE_ATTEMPTS,
+            "downAfter": config.HOST_DOWN_AFTER,
+        },
+    }
+
+
+def _rebuild_settings():
+    """Apply the optional `settings:` block from rudder.yml (GitOps config),
+    clamping each value and falling back to the env/default for anything missing
+    or invalid. Removing the block reverts to defaults. Never raises — a bad
+    value can't take down reconcile, it just keeps the default."""
+    eff = _defaults()
+
+    def _num(dst, src, key, cast, lo, hi):
+        if not isinstance(src, dict) or src.get(key) is None:
+            return
+        try:
+            dst[key] = max(lo, min(hi, cast(src.get(key))))
+        except (TypeError, ValueError):
+            pass
+
+    for m in manifests.values():
+        try:
+            data = yaml.safe_load(m.get("rudderYaml") or "") or {}
+        except Exception:
+            continue
+        s = data.get("settings") if isinstance(data, dict) else None
+        if not isinstance(s, dict):
+            continue
+        _num(eff, s, "reconcileSeconds", int, 10, 86400)
+        _num(eff, s, "runWorkers", int, 1, 64)
+        _num(eff, s, "runQueueMax", int, 1, 1000)
+        _num(eff, s, "runTimeoutSeconds", int, 0, 86400)    # 0 disables the timeout
+        if isinstance(s.get("sshStrict"), bool):
+            eff["sshStrict"] = s["sshStrict"]
+        r = s.get("reachability")
+        _num(eff["reachability"], r, "intervalSeconds", int, 5, 3600)
+        _num(eff["reachability"], r, "timeoutSeconds", float, 0.5, 30)
+        _num(eff["reachability"], r, "attempts", int, 1, 5)
+        _num(eff["reachability"], r, "downAfter", int, 1, 20)
+        break                                   # first repo that defines settings wins
+    # Apply in place so existing references (the probe alias, runner reads) stay valid.
+    for k in ("reconcileSeconds", "runWorkers", "runQueueMax", "runTimeoutSeconds", "sshStrict"):
+        settings[k] = eff[k]
+    settings["reachability"].update(eff["reachability"])
 
 
 def manifest_view() -> dict:

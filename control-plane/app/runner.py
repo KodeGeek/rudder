@@ -52,7 +52,7 @@ def _ssh_args() -> str:
     """SSH options for Ansible. Trust-on-first-use against a persisted known_hosts
     by default (MITM-safe after first contact), or strict if SSH_STRICT is set —
     instead of the old blanket StrictHostKeyChecking=no that trusted any host."""
-    mode = "yes" if config.SSH_STRICT else "accept-new"
+    mode = "yes" if store.settings["sshStrict"] else "accept-new"
     kh = config.SSH_KNOWN_HOSTS
     try:
         os.makedirs(os.path.dirname(kh), exist_ok=True)
@@ -200,8 +200,9 @@ def run_job(name: str, manual: bool = False):
 
         _running[run_id] = proc
         timer = None
-        if config.RUN_TIMEOUT_SECONDS > 0:
-            timer = threading.Timer(config.RUN_TIMEOUT_SECONDS, _on_timeout)
+        run_timeout = store.settings["runTimeoutSeconds"]
+        if run_timeout > 0:
+            timer = threading.Timer(run_timeout, _on_timeout)
             timer.start()
         try:
             for line in proc.stdout:
@@ -217,7 +218,7 @@ def run_job(name: str, manual: bool = False):
                 timer.cancel()
 
         if timed_out:
-            log_lines.append({"t": "err", "text": f"control-plane: playbook timed out ({config.RUN_TIMEOUT})"})
+            log_lines.append({"t": "err", "text": f"control-plane: playbook timed out ({run_timeout}s)"})
             exit_code = 124
         elif run_id in _stopped:
             _stopped.discard(run_id)
@@ -277,7 +278,7 @@ def run_async(name: str, manual: bool = True):
         if cur is not None and not cur.done():
             raise AlreadyRunning(name)
         active = sum(1 for f in _inflight.values() if not f.done())
-        if active >= config.RUN_QUEUE_MAX:
+        if active >= store.settings["runQueueMax"]:
             raise QueueFull()
         fut = _pool.submit(run_job, name, manual)
         _inflight[name] = fut
@@ -304,6 +305,21 @@ def active_count() -> int:
     """Runs currently queued or executing (for /metrics + /readyz)."""
     with _inflight_lock:
         return sum(1 for f in _inflight.values() if not f.done())
+
+
+def apply_workers(n: int):
+    """Resize the run pool when settings.runWorkers changes — but only while the
+    pool is idle, since a ThreadPoolExecutor can't be resized in place and doing
+    it mid-run would disrupt in-flight work. If busy, a later reconcile re-applies."""
+    global _pool
+    try:
+        if n == _pool._max_workers or active_count() > 0:
+            return
+        old, _pool = _pool, ThreadPoolExecutor(max_workers=n)
+        old.shutdown(wait=False)
+        log.info("run pool resized", workers=n)
+    except Exception as e:
+        log.error("run pool resize failed", error=repr(e))
 
 
 def shutdown():

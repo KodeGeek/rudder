@@ -204,6 +204,7 @@ Design notes and the full spec: [`docs/superpowers/specs/`](docs/superpowers/spe
 
 | Doc | What's in it |
 |---|---|
+| **[docs/CONFIG.md](docs/CONFIG.md)** | Configure Rudder from `rudder.yml` (GitOps): settings (intervals, run limits, reachability), alerts, dashboard layout. |
 | **[deploy/INSTALL.md](deploy/INSTALL.md)** | Install with docker-compose or Helm (kind, AKS, EKS, GKE, OpenShift); API key & ingress. |
 | **[deploy/DEPLOY.md](deploy/DEPLOY.md)** | Architecture, external Prometheus/Loki/Vault, reboot-safety, production hardening. |
 | **[SECURITY.md](SECURITY.md)** | The secret model, auth options, and how to report a vulnerability. |
