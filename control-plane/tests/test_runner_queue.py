@@ -3,7 +3,7 @@ import threading
 
 import pytest
 
-from app import config, runner
+from app import config, runner, store
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def gated(monkeypatch):
 
 def test_single_flight_rejects_duplicate(gated, monkeypatch):
     release, started = gated
-    monkeypatch.setattr(config, "RUN_QUEUE_MAX", 100)
+    monkeypatch.setitem(store.settings, "runQueueMax", 100)
     runner.run_async("jobA")
     started.acquire(timeout=5)                       # ensure it's running
     with pytest.raises(runner.AlreadyRunning):
@@ -37,7 +37,7 @@ def test_single_flight_rejects_duplicate(gated, monkeypatch):
 
 def test_backpressure_when_saturated(gated, monkeypatch):
     release, started = gated
-    monkeypatch.setattr(config, "RUN_QUEUE_MAX", 2)
+    monkeypatch.setitem(store.settings, "runQueueMax", 2)
     runner.run_async("job0")
     runner.run_async("job1")
     with pytest.raises(runner.QueueFull):
@@ -46,7 +46,7 @@ def test_backpressure_when_saturated(gated, monkeypatch):
 
 def test_slot_frees_after_completion(gated, monkeypatch):
     release, started = gated
-    monkeypatch.setattr(config, "RUN_QUEUE_MAX", 1)
+    monkeypatch.setitem(store.settings, "runQueueMax", 1)
     fut = runner.run_async("job0")
     with pytest.raises(runner.QueueFull):
         runner.run_async("job1")                     # full
