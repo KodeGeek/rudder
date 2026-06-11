@@ -173,8 +173,8 @@ export function App() {
           {data.role === "viewer" && (
             <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", padding: "4px 9px", borderRadius: 99, background: "var(--surface-3)" }}>read-only</span>
           )}
-          <IconBtn icon={theme === "dark" ? Icons.sun : Icons.moon} title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} />
-          {signedIn && <IconBtn icon={Icons.key} title="Sign out" onClick={() => data.signOut()} />}
+          <IconBtn icon={theme === "dark" ? Icons.sun : Icons.moon} title="Toggle theme" ariaLabel={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} onClick={() => setTheme(theme === "dark" ? "light" : "dark")} />
+          {signedIn && <IconBtn icon={Icons.key} title="Sign out" ariaLabel="Sign out" onClick={() => data.signOut()} />}
           {data.canWrite && <Btn kind="solid" size="sm" icon={Icons.refresh} onClick={() => data.reconcileNow()}>Reconcile now</Btn>}
         </header>
 

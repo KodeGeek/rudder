@@ -64,10 +64,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const refresh = React.useCallback(async () => {
     if (!live) { setLoading(false); return; }
     // Resilient: a single failing endpoint must not black out the whole UI.
+    const endpoints = [
+      "repos", "jobs", "activity", "inventory",
+      "reconcile", "secrets", "channels", "info",
+    ];
     const r = await Promise.allSettled([
       api.repos(), api.jobs(), api.activity(), api.inventory(),
       api.reconcile(), api.secrets(), api.channels(), api.info(),
     ]);
+    r.forEach((result, i) => {
+      if (result.status === "rejected") {
+        console.warn(`Failed to fetch ${endpoints[i]}: ${(result.reason as Error).message}`);
+      }
+    });
     const ok = (i: number) => r[i].status === "fulfilled";
     const v = <T,>(i: number, d: T): T => (r[i].status === "fulfilled" ? (r[i] as PromiseFulfilledResult<T>).value : d);
     // A 401 mid-session (e.g. key rotated) is "needs login", not "backend down".

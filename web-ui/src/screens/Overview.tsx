@@ -61,10 +61,11 @@ function ServerResources() {
   const [s, setS] = React.useState<HostStats | null>(null);
   React.useEffect(() => {
     let on = true;
-    const load = () => api.hostStats().then((d) => { if (on) setS(d); }).catch(() => {});
+    const ctrl = new AbortController();
+    const load = () => api.hostStats(ctrl.signal).then((d) => { if (on) setS(d); }).catch(() => {});
     load();
     const id = setInterval(load, 5000);
-    return () => { on = false; clearInterval(id); };
+    return () => { on = false; clearInterval(id); ctrl.abort(); };
   }, []);
   return (
     <Card pad={false} style={{ height: "100%" }}>
@@ -603,7 +604,7 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {(CATALOG.find((c) => c.type === it.type && c.metric === it.metric)?.label) || it.metric || it.type}
                 </span>
-                <button className="rdash-no-drag" title="Remove widget"
+                <button className="rdash-no-drag" title="Remove widget" aria-label="Remove widget"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => { e.stopPropagation(); remove(it.id); }}
                   style={{ display: "grid", placeItems: "center", width: 24, height: 24, border: "none", borderRadius: 6,
@@ -630,7 +631,7 @@ export function OverviewScreen({ nav }: { nav: NavFn }) {
                 <Icons.doc size={16} style={{ color: "var(--text-3)" }} />
                 <span style={{ fontSize: "var(--fs-md)", fontWeight: 600 }}>Commit this to <span className="mono">rudder.yml</span></span>
                 <span style={{ flex: 1 }} />
-                <button onClick={() => setYamlOpen(false)} style={{ display: "grid", placeItems: "center", width: 24, height: 24, border: "none", borderRadius: 6, background: "transparent", color: "var(--text-3)", cursor: "pointer" }}><Icons.x size={15} /></button>
+                <button onClick={() => setYamlOpen(false)} aria-label="Close dialog" style={{ display: "grid", placeItems: "center", width: 24, height: 24, border: "none", borderRadius: 6, background: "transparent", color: "var(--text-3)", cursor: "pointer" }}><Icons.x size={15} /></button>
               </div>
               <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-3)", marginBottom: 10 }}>
                 Paste this <span className="mono">dashboard:</span> block into your repo's <span className="mono">rudder.yml</span> and commit — reconcile reads it, so your layout survives any rebuild.

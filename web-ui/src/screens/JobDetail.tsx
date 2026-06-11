@@ -67,12 +67,13 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
       .finally(() => setPbLoading(false));
   }, [view, pb, name]);
 
-  const load = React.useCallback(async () => {
+  const load = React.useCallback(async (signal?: AbortSignal) => {
     try {
-      const j = await api.job(name);
+      const j = await api.job(name, signal);
       setJob(j);
       setSel((s) => s || j.runs[0]?.id);
     } catch {
+      if (signal?.aborted) return;   // poll cancelled on unmount/stop — keep current job
       setJob(null);
     } finally {
       setLoading(false);
@@ -84,8 +85,9 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
   const isRunning = job?.status === "running" || !!job?.runs?.some((r) => r.status === "running");
   React.useEffect(() => {
     if (!isRunning) return;
-    const id = setInterval(load, 2500);
-    return () => clearInterval(id);
+    const ctrl = new AbortController();
+    const id = setInterval(() => load(ctrl.signal), 2500);
+    return () => { clearInterval(id); ctrl.abort(); };
   }, [isRunning, load]);
 
   if (loading && !job) return <EmptyState icon={Icons.refresh} title="Loading job…" />;
@@ -108,7 +110,7 @@ export function JobDetailScreen({ name, nav }: { name: string; nav: NavFn }) {
 
   return (
     <div style={{ maxWidth: 1320, margin: "0 auto", padding: "20px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
-      <button onClick={() => nav("jobs")} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "var(--text-3)", fontSize: "var(--fs-sm)", padding: 0 }}>
+      <button onClick={() => nav("jobs")} aria-label="Back to jobs" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "var(--text-3)", fontSize: "var(--fs-sm)", padding: 0 }}>
         <Icons.chevL size={15} /> Jobs
       </button>
 

@@ -144,10 +144,10 @@ export function Btn({ children, kind = "ghost", size = "md", icon: I, iconR: IR,
   );
 }
 
-export function IconBtn({ icon: I, onClick, title, active, size = 32 }: { icon: IconFn; onClick?: () => void; title?: string; active?: boolean; size?: number }) {
+export function IconBtn({ icon: I, onClick, title, active, size = 32, ariaLabel }: { icon: IconFn; onClick?: () => void; title?: string; active?: boolean; size?: number; ariaLabel?: string }) {
   const [h, setH] = React.useState(false);
   return (
-    <button onClick={onClick} title={title} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
+    <button onClick={onClick} title={title} aria-label={ariaLabel || title} onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
       style={{ width: size, height: size, display: "grid", placeItems: "center", borderRadius: "var(--r-md)",
         background: active ? "var(--accent-soft)" : h ? "var(--surface-2)" : "transparent",
         color: active ? "var(--accent-text)" : h ? "var(--text)" : "var(--text-3)",

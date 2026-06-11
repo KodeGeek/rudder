@@ -31,8 +31,8 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> | u
   return Object.keys(h).length ? h : undefined;
 }
 
-async function get<T>(path: string): Promise<T> {
-  const r = await fetch(base() + path, { cache: "no-store", headers: authHeaders() });
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const r = await fetch(base() + path, { cache: "no-store", headers: authHeaders(), signal });
   if (r.status === 401) throw new AuthError(`GET ${path} → 401`);
   if (!r.ok) throw new Error(`GET ${path} → ${r.status}`);
   return r.json() as Promise<T>;
@@ -79,7 +79,7 @@ export const api = {
     send<ConnectedRepo>("POST", "/repos/credentials", body),
   removeRepo: (id: string) => send<void>("DELETE", "/repos/" + id),
   jobs: () => get<Job[]>("/jobs"),
-  job: (name: string) => get<Job>("/jobs/" + encodeURIComponent(name)),
+  job: (name: string, signal?: AbortSignal) => get<Job>("/jobs/" + encodeURIComponent(name), signal),
   verify: () => get<AuthInfo>("/auth/verify"),
   testChannel: (type: string, target: string) =>
     send<{ sent: boolean }>("POST", "/channels/test", { type, target }),
@@ -88,7 +88,7 @@ export const api = {
   runJob: (name: string) => send<{ started: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/run"),
   stopRun: (name: string, runId: string) =>
     send<{ stopped: boolean }>("POST", "/jobs/" + encodeURIComponent(name) + "/runs/" + encodeURIComponent(runId) + "/stop"),
-  hostStats: () => get<HostStats>("/host-stats"),
+  hostStats: (signal?: AbortSignal) => get<HostStats>("/host-stats", signal),
   audit: () => get<AuditEntry[]>("/audit"),
   rotateSecret: () => send<{ public: string; rotated: number }>("POST", "/secrets/rotate"),
   reconcile: () => get<Reconcile>("/reconcile"),

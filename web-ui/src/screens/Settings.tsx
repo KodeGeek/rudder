@@ -317,7 +317,7 @@ export function ConnectScreen({ nav, params }: { nav: NavFn; params?: RouteParam
 
   return (
     <div style={{ maxWidth: 560, margin: "0 auto", padding: "40px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
-      <button onClick={() => nav("settings")} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "var(--text-3)", fontSize: "var(--fs-sm)", padding: 0, marginBottom: 20 }}>
+      <button onClick={() => nav("settings")} aria-label="Back to settings" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "var(--text-3)", fontSize: "var(--fs-sm)", padding: 0, marginBottom: 20 }}>
         <Icons.chevL size={15} /> Settings
       </button>
 
@@ -469,7 +469,7 @@ export function CredentialsScreen({ nav, params }: { nav: NavFn; params?: RouteP
 
   return (
     <div style={{ maxWidth: 600, margin: "0 auto", padding: "40px 30px 60px", animation: "screen-in .35s cubic-bezier(.2,.7,.2,1) both" }}>
-      <button onClick={() => nav("settings")} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "var(--text-3)", fontSize: "var(--fs-sm)", padding: 0, marginBottom: 20 }}>
+      <button onClick={() => nav("settings")} aria-label="Back to settings" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "none", border: "none", color: "var(--text-3)", fontSize: "var(--fs-sm)", padding: 0, marginBottom: 20 }}>
         <Icons.chevL size={15} /> Settings
       </button>
 
