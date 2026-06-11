@@ -34,6 +34,11 @@ spec:
             httpGet: { path: /ready, port: 3100 }
             initialDelaySeconds: 10
             periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /ready, port: 3100 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
           volumeMounts:
             - { name: data, mountPath: /loki }
           resources:

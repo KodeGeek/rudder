@@ -66,6 +66,14 @@ services:
       - ./vault/config.hcl:/openbao/config/config.hcl:ro
     networks: [rudder]
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.02"
+          memory: 64M
     healthcheck:
       # exit 0 = unsealed/ready; exit 2 = sealed (briefly, until the sidecar unseals)
       test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
@@ -92,6 +100,14 @@ services:
       - vault-shared:/vault-shared
     networks: [rudder]
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
+        reservations:
+          cpus: "0.01"
+          memory: 32M
     profiles: ["bundled"]
 
   # ── Bundled Git server (seeded demo source) ──────────────────────
@@ -188,6 +204,14 @@ services:
       - prometheus-data:/prometheus
     networks: [rudder]
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.05"
+          memory: 256M
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
       interval: 30s
@@ -201,6 +225,14 @@ services:
     container_name: rudder-pushgateway
     networks: [rudder]
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.2"
+          memory: 128M
+        reservations:
+          cpus: "0.01"
+          memory: 32M
     profiles: ["bundled"]
 
   # ── Log store for run-log drill-down ─────────────────────────────
@@ -212,6 +244,14 @@ services:
       - loki-data:/loki
     networks: [rudder]
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.05"
+          memory: 128M
     # NOTE: the grafana/loki image is distroless (no shell/wget), so a CMD
     # healthcheck isn't possible. Readiness is verified at /ready by callers.
     profiles: ["bundled"]

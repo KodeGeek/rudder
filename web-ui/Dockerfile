@@ -15,7 +15,7 @@
 #     rudder-web-ui
 
 # ---- stage 1: build ----
-FROM node:22-alpine AS build
+FROM node:22-alpine@sha256:9385cd9f3001dfc3431e8ead12c43e9e1f87cc1b9b5c6cfd0f73865d405b27c4 AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci || npm install
@@ -23,7 +23,7 @@ COPY . .
 RUN npm run build
 
 # ---- stage 2: serve ----
-FROM nginx:1.27-alpine
+FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 
 # nginx config is a template — our vars are substituted at start, nginx's own
 # $variables are preserved via NGINX_ENVSUBST_FILTER.

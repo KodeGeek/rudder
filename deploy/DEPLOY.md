@@ -204,6 +204,25 @@ docker compose --profile bundled --profile backend start
 curl -s http://localhost:8080/api/control-plane/repos    # repo + schedule still there
 ```
 
+## Resource limits (Docker)
+
+The bundled infra services have CPU and memory limits to prevent runaway resource
+consumption on shared hosts:
+
+| Service | CPU limit | Memory limit | CPU reservation | Memory reservation |
+|---------|-----------|--------------|-----------------|-------------------|
+| vault | 0.5 | 256M | 0.02 | 64M |
+| vault-unseal | 0.1 | 64M | 0.01 | 32M |
+| prometheus | 1 | 1G | 0.05 | 256M |
+| pushgateway | 0.2 | 128M | 0.01 | 32M |
+| loki | 1 | 512M | 0.05 | 128M |
+
+To override limits, pass `--cpus` and `--memory` to `docker run`, or edit
+`docker-compose.yml` `deploy.resources` sections before `docker compose up`.
+Reservations are soft requests; limits are hard enforcement (OOMKilled if exceeded).
+
+---
+
 ## Production hardening
 
 The compose/k8s manifests are reference deployments for self-hosting. Before

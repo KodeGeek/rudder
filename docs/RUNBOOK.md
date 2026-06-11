@@ -74,6 +74,46 @@ Prometheus + Loki remain the durable long-term record of metrics and run logs.
 
 ## Upgrades
 
-Images use unique tags (kustomize playbook) or chart `image.tag`. Roll with
-`kubectl -n rudder rollout restart deploy/control-plane` or `helm upgrade`.
-`terminationGracePeriodSeconds: 40` lets in-flight runs drain on shutdown.
+### Pre-upgrade: back up the database
+
+State lives in SQLite on `cp-work:/app/work/rudder.db` (or the `vault-data` PVC
+for secrets). Before upgrading, back it up:
+
+```bash
+# Docker Compose
+docker compose exec control-plane \
+  sh -c 'sqlite3 /app/work/rudder.db ".backup /app/work/backup.db"'
+docker compose cp rudder-control-plane:/app/work/backup.db ./rudder-backup.db
+
+# Kubernetes
+kubectl -n rudder exec deploy/control-plane -- \
+  sh -c 'sqlite3 /app/work/rudder.db ".backup /app/work/backup.db"'
+kubectl -n rudder cp rudder/<pod>:/app/work/backup.db ./rudder-backup.db
+```
+
+See **Backups & restore** (Docker/Kubernetes sections) for full details.
+
+### Upgrade flow
+
+**Docker Compose:**
+```bash
+docker compose pull              # fetch new images
+docker compose --profile bundled --profile backend up -d   # apply
+```
+
+**Kubernetes (raw kustomize):**
+Update image tags in `deploy/k8s/10-web-ui.yaml`, `deploy/k8s/50-control-plane.yaml`, etc., then:
+```bash
+kubectl apply -k deploy/k8s
+```
+
+**Helm:**
+```bash
+helm upgrade rudder ./chart --set image.tag=<new-tag>
+```
+
+### No manual schema steps
+
+Database schema is created automatically on startup (`CREATE TABLE IF NOT EXISTS`),
+and any JSON→SQLite migration runs once. The control-plane is safe to upgrade in
+place — restarting it will reconcile any schema changes.
