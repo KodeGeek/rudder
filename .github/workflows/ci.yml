@@ -26,7 +26,7 @@ jobs:
       - name: Byte-compile
         run: python -m py_compile app/*.py
       - name: Unit tests
-        run: pytest
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=60
 
   frontend:
     name: web-ui (typecheck + build)
@@ -46,6 +46,17 @@ jobs:
         run: npx tsc --noEmit
       - name: Build
         run: npx vite build
+      - name: Test
+        run: npm test
+
+  helm:
+    name: helm lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint Helm chart
+        run: helm lint --strict deploy/helm/rudder
 
   images:
     name: docker build (no push)
