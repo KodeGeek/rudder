@@ -9,10 +9,250 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from typing import Optional
+
 from . import alerts, audit, auth, config, gitea, host, log, metrics, runner, store, vault
+from pydantic import ConfigDict
 
 # Auth guards every route; probe/schema paths are excluded inside require_auth.
 app = FastAPI(title="Rudder control-plane", dependencies=[Depends(auth.require_auth)])
+
+# ── Response Models ──
+class HealthzResponse(BaseModel):
+    status: str
+    booted: bool
+
+
+class ReadyzResponse(BaseModel):
+    ready: bool
+
+
+class AuthVerifyResponse(BaseModel):
+    ok: bool
+    role: str
+    authRequired: bool
+
+
+class InfoResponse(BaseModel):
+    bundledRepoUrl: Optional[str]
+    reconcileInterval: str
+
+
+class Commit(BaseModel):
+    sha: str = ""
+    msg: str = ""
+    author: str = ""
+    at: int = 0
+
+
+class ConnectedRepo(BaseModel):
+    id: str
+    provider: str
+    slug: str
+    branch: str
+    url: str
+    addedAt: int
+    auth: bool = False
+    authMethod: str = ""
+    hostKey: bool = False
+    vaultPass: bool = False
+    lastCommit: Optional[Commit] = None
+    sync: str = ""
+    error: Optional[str] = None
+    model_config = ConfigDict(extra="ignore")
+
+
+class DeployKeyResponse(BaseModel):
+    rid: str
+    publicKey: str
+    sshUrl: str
+
+
+class ReconcileState(BaseModel):
+    lastAt: Optional[int]
+    intervalMin: int
+    inSync: bool
+    pendingCommit: None = None
+    nextAt: Optional[int]
+
+
+class SparkPoint(BaseModel):
+    d: int
+    ok: bool
+
+
+class Run(BaseModel):
+    id: str
+    at: int
+    status: str
+    duration: Optional[int] = None
+    exit: Optional[int] = None
+    host: str = ""
+
+
+class JobView(BaseModel):
+    name: str
+    cron: str
+    playbook: str
+    limit: str
+    kind: str
+    args: Optional[str] = None
+    desc: str = ""
+    provider: str
+    repoSlug: str
+    branch: str
+    enabled: bool
+    status: str
+    lastRun: Optional[int] = None
+    duration: Optional[int] = None
+    exit: Optional[int] = None
+    successRate: Optional[int] = None
+    spark: list[SparkPoint]
+    runs: list[Run]
+    nextRun: Optional[int] = None
+
+
+class ActivityItem(BaseModel):
+    job: str
+    provider: str
+    status: str
+    at: int
+    duration: Optional[int] = None
+    host: str = ""
+    exit: Optional[int] = None
+    kind: str
+    runId: str
+
+
+class Group(BaseModel):
+    name: str
+    hosts: int
+    up: int
+    desc: str
+
+
+class Host(BaseModel):
+    name: str
+    group: str
+    ip: str
+    os: str
+    up: bool
+    jobs: int
+    lastSeen: Optional[int] = None   # None until the host has been probed
+
+
+class InventoryResponse(BaseModel):
+    groups: list[Group]
+    hosts: list[Host]
+
+
+class ManifestView(BaseModel):
+    jobsYaml: str
+    rudderYaml: str
+    found: bool
+    playbooks: list[str]
+    slug: str = ""
+    branch: str = ""
+    provider: str = ""
+
+
+class Channel(BaseModel):
+    type: str
+    label: str
+    target: str
+    on: list[str]
+    enabled: bool
+
+
+class DashboardWidget(BaseModel):
+    type: str
+    x: int
+    y: int
+    w: int
+    h: int
+    metric: Optional[str] = None
+    model_config = ConfigDict(extra="ignore")
+
+
+class DashboardResponse(BaseModel):
+    cols: int
+    widgets: Optional[list[DashboardWidget]] = None
+
+
+class ReachabilitySettings(BaseModel):
+    intervalSeconds: int
+    timeoutSeconds: float
+    attempts: int
+    downAfter: int
+
+
+class SettingsResponse(BaseModel):
+    reconcileSeconds: int
+    runWorkers: int
+    runQueueMax: int
+    runTimeoutSeconds: int
+    sshStrict: bool
+    reachability: ReachabilitySettings
+    model_config = ConfigDict(extra="ignore")
+
+
+class PlaybookResponse(BaseModel):
+    path: str
+    content: str
+    found: bool
+
+
+class UsageStat(BaseModel):
+    used: int
+    total: int
+    pct: float
+
+
+class HostStatsResponse(BaseModel):
+    cpu: Optional[float] = None
+    mem: Optional[UsageStat] = None    # {used,total,pct} — not a bare float
+    disk: Optional[UsageStat] = None
+    source: Optional[str] = None
+    error: Optional[str] = None
+    model_config = ConfigDict(extra="ignore")
+
+
+class AuditEntry(BaseModel):
+    at: int
+    principal: str
+    role: str
+    action: str
+    target: str
+    source_ip: str
+    detail: str = ""
+    model_config = ConfigDict(extra="ignore")
+
+
+class SecretRef(BaseModel):
+    ref: str
+    used: int
+    rotated: int
+    kind: str
+    rotatable: bool = False
+    warn: Optional[bool] = None
+    model_config = ConfigDict(extra="ignore")
+
+
+class RunStartResponse(BaseModel):
+    started: bool
+
+
+class RunStopResponse(BaseModel):
+    stopped: bool
+
+
+class RotateSecretResponse(BaseModel):
+    public: str
+    rotated: int
+
+
+class ChannelTestResponse(BaseModel):
+    sent: bool
 scheduler = BackgroundScheduler(timezone="UTC")
 _booted = {"ok": False}
 
@@ -173,7 +413,7 @@ def shutdown():
 
 
 # ── API ──
-@app.get("/healthz")
+@app.get("/healthz", response_model=HealthzResponse)
 def healthz():
     return {"status": "ok", "booted": _booted["ok"]}
 
@@ -195,12 +435,12 @@ def metrics_endpoint():
     return Response(content=data, media_type=ctype)
 
 
-@app.get("/auth/verify")
+@app.get("/auth/verify", response_model=AuthVerifyResponse)
 def auth_verify(principal: auth.Principal = Depends(auth.require_auth)):
     return {"ok": True, "role": principal.role, "authRequired": bool(config.API_KEY)}
 
 
-@app.get("/info")
+@app.get("/info", response_model=InfoResponse)
 def info():
     return {
         "bundledRepoUrl": config.BUNDLED_REPO_URL if config.GITEA_SEED else None,
@@ -208,7 +448,7 @@ def info():
     }
 
 
-@app.get("/repos")
+@app.get("/repos", response_model=list[ConnectedRepo])
 def get_repos():
     # flags reflect live Vault state (so replacing/clearing a secret is accurate);
     # the secret values themselves are never returned.
@@ -227,7 +467,7 @@ class RepoIn(BaseModel):
     vaultPass: str = ""
 
 
-@app.post("/repos")
+@app.post("/repos", response_model=ConnectedRepo)
 def add_repo(body: RepoIn, request: Request,
              principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     rec = store.add_repo(body.provider, body.url, body.branch, body.token, body.authMethod, body.vaultPass)
@@ -248,7 +488,7 @@ class CredsIn(BaseModel):
     token: str = ""        # git token (re-auth)
 
 
-@app.post("/repos/credentials")
+@app.post("/repos/credentials", response_model=ConnectedRepo)
 def set_credentials(body: CredsIn, request: Request,
                     principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
     """Write-only: store run/decrypt secrets in Vault. NEVER returns secret
@@ -281,7 +521,7 @@ class DeployKeyIn(BaseModel):
     url: str
 
 
-@app.post("/deploy-key")
+@app.post("/deploy-key", response_model=DeployKeyResponse)
 def deploy_key(body: DeployKeyIn, request: Request,
                principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     """Generate (if needed) a per-repo deploy keypair; return the PUBLIC key for
@@ -301,12 +541,12 @@ def delete_repo(rid: str, request: Request,
     return Response(status_code=204)
 
 
-@app.get("/reconcile")
+@app.get("/reconcile", response_model=ReconcileState)
 def get_reconcile():
     return store.reconcile_state
 
 
-@app.post("/reconcile")
+@app.post("/reconcile", response_model=ReconcileState)
 def post_reconcile(request: Request,
                    principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     audit.record(principal, "reconcile", "", request)
@@ -314,19 +554,19 @@ def post_reconcile(request: Request,
     return store.reconcile_state
 
 
-@app.get("/jobs")
+@app.get("/jobs", response_model=list[JobView])
 def get_jobs():
     return [store.job_view(n, _next_ms(n)) for n in store.jobs]
 
 
-@app.get("/jobs/{name}")
+@app.get("/jobs/{name}", response_model=JobView)
 def get_job(name: str):
     if name not in store.jobs:
         raise HTTPException(status_code=404, detail="job not found")
     return store.job_view(name, _next_ms(name), with_runs=True)
 
 
-@app.post("/jobs/{name}/run")
+@app.post("/jobs/{name}/run", response_model=RunStartResponse)
 def run_now(name: str, request: Request,
             principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     if name not in store.jobs:
@@ -341,7 +581,7 @@ def run_now(name: str, request: Request,
     return {"started": True}
 
 
-@app.post("/jobs/{name}/runs/{run_id}/stop")
+@app.post("/jobs/{name}/runs/{run_id}/stop", response_model=RunStopResponse)
 def stop_run(name: str, run_id: str, request: Request,
              principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     if name not in store.jobs:
@@ -350,7 +590,7 @@ def stop_run(name: str, run_id: str, request: Request,
     return {"stopped": runner.stop_run(run_id)}
 
 
-@app.get("/jobs/{name}/playbook")
+@app.get("/jobs/{name}/playbook", response_model=PlaybookResponse)
 def get_playbook(name: str):
     j = store.jobs.get(name)
     if not j:
@@ -366,39 +606,39 @@ def get_playbook(name: str):
         return {"path": rel, "content": "", "found": False}
 
 
-@app.get("/host-stats")
+@app.get("/host-stats", response_model=HostStatsResponse)
 def host_stats():
     return host.stats()
 
 
-@app.get("/activity")
+@app.get("/activity", response_model=list[ActivityItem])
 def get_activity():
     return store.activity_view()
 
 
-@app.get("/inventory")
+@app.get("/inventory", response_model=InventoryResponse)
 def get_inventory():
     return store.inventory_view()
 
 
-@app.get("/manifest")
+@app.get("/manifest", response_model=ManifestView)
 def get_manifest():
     return store.manifest_view()
 
 
-@app.get("/channels")
+@app.get("/channels", response_model=list[Channel])
 def get_channels():
     return store.channels_view()
 
 
-@app.get("/dashboard")
+@app.get("/dashboard", response_model=DashboardResponse)
 def get_dashboard():
     """The committed Overview layout (dashboard: in rudder.yml), or widgets:null
     when none is set so the UI uses its built-in default layout."""
     return store.dashboard_view() or {"cols": 12, "widgets": None}
 
 
-@app.get("/settings")
+@app.get("/settings", response_model=SettingsResponse)
 def get_settings():
     """Effective operational settings — built-in defaults plus any overrides from
     the `settings:` block in rudder.yml. Secret values are never included here."""
@@ -410,7 +650,7 @@ class ChannelTest(BaseModel):
     target: str = ""
 
 
-@app.post("/channels/test")
+@app.post("/channels/test", response_model=ChannelTestResponse)
 def test_channel(body: ChannelTest, request: Request,
                  principal: auth.Principal = Depends(auth.require_role(*auth.WRITERS))):
     audit.record(principal, "channel.test", body.target, request)
@@ -421,12 +661,12 @@ def test_channel(body: ChannelTest, request: Request,
         raise HTTPException(status_code=502, detail=f"test failed: {e}")
 
 
-@app.get("/audit")
+@app.get("/audit", response_model=list[AuditEntry])
 def get_audit(principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
     return audit.recent()
 
 
-@app.get("/secrets")
+@app.get("/secrets", response_model=list[SecretRef])
 def get_secrets():
     try:
         return vault.list_secret_refs()
@@ -434,7 +674,7 @@ def get_secrets():
         return []
 
 
-@app.post("/secrets/rotate")
+@app.post("/secrets/rotate", response_model=RotateSecretResponse)
 def rotate_secret(request: Request,
                   principal: auth.Principal = Depends(auth.require_role(*auth.ADMINS))):
     """Rotate the Rudder-managed run SSH key. Operator-supplied secrets (git

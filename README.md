@@ -92,7 +92,7 @@ holds the secrets, and the UI shows you what happened.*
                                    Web UI (status, history, logs)
 ```
 
-The manifest is just a list of scheduled runs:
+The manifest is just a list of scheduled runs (see **[docs/JOBS_MANIFEST.md](docs/JOBS_MANIFEST.md)** for the complete format):
 
 ```yaml
 # ansible/jobs.yml  (a bare list, or under a `jobs:` / `scheduled_jobs:` key)
@@ -204,6 +204,8 @@ Design notes and the full spec: [`docs/superpowers/specs/`](docs/superpowers/spe
 
 | Doc | What's in it |
 |---|---|
+| **[docs/API.md](docs/API.md)** | Control-plane REST API reference: every endpoint, auth, request/response schemas, status codes. Interactive docs at `/docs` (Swagger) and `/redoc` (ReDoc). |
+| **[docs/JOBS_MANIFEST.md](docs/JOBS_MANIFEST.md)** | Job manifest format: `jobs.yml` structure, required/optional fields, cron syntax, examples, and troubleshooting. |
 | **[docs/CONFIG.md](docs/CONFIG.md)** | Configure Rudder from `rudder.yml` (GitOps): settings (intervals, run limits, reachability), alerts, dashboard layout. |
 | **[deploy/INSTALL.md](deploy/INSTALL.md)** | Install with docker-compose or Helm (kind, AKS, EKS, GKE, OpenShift); API key & ingress. |
 | **[deploy/DEPLOY.md](deploy/DEPLOY.md)** | Architecture, external Prometheus/Loki/Vault, reboot-safety, production hardening. |
