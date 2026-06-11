@@ -8,6 +8,7 @@ web-ui/dist/
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
 .venv/
 
 # ── control-plane runtime state (created on the work volume at runtime) ──

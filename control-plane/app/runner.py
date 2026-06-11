@@ -5,6 +5,7 @@ removed afterwards). Status/duration/exit/log are recorded; metrics + logs are
 pushed to Pushgateway and Loki.
 """
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -36,15 +37,16 @@ def stop_run(run_id: str) -> bool:
         os.killpg(pgid, signal.SIGTERM)
 
         def _hard_kill():
+            # Re-poll before SIGKILL; process may have exited between SIGTERM and now.
             if proc.poll() is None:
                 try:
                     os.killpg(pgid, signal.SIGKILL)
-                except ProcessLookupError:
+                except (ProcessLookupError, OSError):
                     pass
 
         threading.Timer(5, _hard_kill).start()
-    except ProcessLookupError:
-        proc.kill()
+    except (ProcessLookupError, OSError):
+        pass
     return True
 
 
@@ -81,6 +83,8 @@ def _classify(line: str) -> str:
 
 def _inventory(limit: str):
     grp = limit if limit and limit != "all" else "all_hosts"
+    # Sanitize group name: [A-Za-z0-9_-] only, prevent INI injection via newlines/brackets.
+    grp = re.sub(r'[^\w-]', '_', grp)
     fd, path = tempfile.mkstemp(prefix="rudder_inv_", suffix=".ini")
     content = (
         f"[{grp}]\n"
@@ -94,19 +98,43 @@ def _inventory(limit: str):
     return path, grp
 
 
+def _within(path: str, root: str) -> bool:
+    """True if realpath `path` is inside `root`. Boundary-safe: a sibling like
+    /tmp/repo-evil is NOT considered inside /tmp/repo."""
+    return path == root or path.startswith(root + os.sep)
+
+
 def _resolve_playbook(j: dict) -> str:
     """Resolve the playbook path relative to the repo root, falling back to the
-    manifest's directory (manifests aren't always at the repo root)."""
+    manifest's directory (manifests aren't always at the repo root).
+
+    Path traversal is prevented: normalized paths must stay inside wd; escapes
+    are treated as playbook-not-found (returns the original path so it fails
+    to open, matching the missing-playbook behavior)."""
     wd, pb = j["_workdir"], j.get("playbook", "")
+    real_wd = os.path.realpath(wd)
+
+    # Try repo root first
     cand = os.path.join(wd, pb)
-    if os.path.exists(cand):
+    real_cand = os.path.realpath(cand)
+    if _within(real_cand, real_wd) and os.path.exists(cand):
         return cand
+
+    # Try manifest directory
     md = j.get("_manifestDir", "")
     if md:
         alt = os.path.join(wd, md, pb)
-        if os.path.exists(alt):
+        real_alt = os.path.realpath(alt)
+        if _within(real_alt, real_wd) and os.path.exists(alt):
             return alt
-    return cand
+
+    # Reached when the playbook wasn't found at either location, or its path
+    # escaped the repo root. For a genuine in-repo miss, return cand so the run
+    # fails cleanly like a missing playbook; for an escape, never hand back an
+    # openable path outside the repo.
+    if _within(real_cand, real_wd):
+        return cand
+    return os.path.join(wd, "__playbook_outside_repo__")
 
 
 def run_job(name: str, manual: bool = False):
@@ -150,7 +178,7 @@ def run_job(name: str, manual: bool = False):
             vp_path = None
 
         if real_inv:
-            inv_arg, cwd, playbook = real_inv, wd, j["playbook"]    # run from repo root
+            inv_arg, cwd, playbook = real_inv, wd, _resolve_playbook(j)   # run from repo root
         else:
             inv_tempfile, grp = _inventory(j["limit"])
             inv_arg, playbook = inv_tempfile, _resolve_playbook(j)

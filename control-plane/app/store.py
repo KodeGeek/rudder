@@ -24,6 +24,8 @@ from . import config, db, vault
 _lock = threading.RLock()
 _migrated = False
 
+GIT_TIMEOUT = 300  # seconds; one hung git server should not stall the whole reconcile loop
+
 repos: dict = {}            # id -> ConnectedRepo (may carry transient "error")
 jobs: dict = {}             # name -> job (internal, with _repoId/_workdir)
 runs: dict = {}             # name -> [run]  (newest first)
@@ -72,7 +74,7 @@ def _ensure_migrated():
     with _lock:
         if _migrated:
             return
-        _migrated = True
+        ok = True
         try:
             if db.repo_count() == 0 and os.path.exists(config.STATE_FILE):
                 imported = []
@@ -84,6 +86,7 @@ def _ensure_migrated():
                 os.rename(config.STATE_FILE, config.STATE_FILE + ".imported")
         except Exception as e:
             print("store: migrate repos failed:", e)
+            ok = False
         try:
             if db.run_count() == 0 and os.path.exists(config.RUNS_FILE):
                 for name, rl in (json.load(open(config.RUNS_FILE)) or {}).items():
@@ -92,6 +95,10 @@ def _ensure_migrated():
                 os.rename(config.RUNS_FILE, config.RUNS_FILE + ".imported")
         except Exception as e:
             print("store: migrate runs failed:", e)
+            ok = False
+        # Only short-circuit future calls if the migration actually succeeded —
+        # a failed import stays retryable rather than being silently skipped.
+        _migrated = ok
 
 
 # ── repos persistence ──
@@ -256,19 +263,28 @@ def reconcile_repo(rid: str):
     ok, err = True, ""
     try:
         if os.path.isdir(os.path.join(wd, ".git")):
-            f = subprocess.run(["git", "-C", wd, "fetch", "-q", url, branch], capture_output=True, text=True, env=env)
-            if f.returncode == 0:
-                subprocess.run(["git", "-C", wd, "reset", "--hard", "-q", "FETCH_HEAD"], capture_output=True, env=env)
-            else:
-                ok, err = False, f.stderr
+            try:
+                f = subprocess.run(["git", "-C", wd, "fetch", "-q", url, branch], capture_output=True, text=True, env=env, timeout=GIT_TIMEOUT)
+                if f.returncode == 0:
+                    subprocess.run(["git", "-C", wd, "reset", "--hard", "-q", "FETCH_HEAD"], capture_output=True, env=env, timeout=GIT_TIMEOUT)
+                else:
+                    ok, err = False, f.stderr
+            except subprocess.TimeoutExpired:
+                ok, err = False, "git fetch timeout"
         else:
             os.makedirs(config.WORKDIR, exist_ok=True)
-            res = subprocess.run(["git", "clone", "-q", "--branch", branch, url, wd], capture_output=True, text=True, env=env)
-            if res.returncode == 0:
-                if not deploy:  # token URL → scrub creds from origin (ssh URLs carry no secret)
-                    subprocess.run(["git", "-C", wd, "remote", "set-url", "origin", r["url"]], capture_output=True)
-            else:
-                ok, err = False, res.stderr
+            try:
+                res = subprocess.run(["git", "clone", "-q", "--branch", branch, url, wd], capture_output=True, text=True, env=env, timeout=GIT_TIMEOUT)
+                if res.returncode == 0:
+                    if not deploy:  # token URL → scrub creds from origin (ssh URLs carry no secret)
+                        try:
+                            subprocess.run(["git", "-C", wd, "remote", "set-url", "origin", r["url"]], capture_output=True, timeout=GIT_TIMEOUT)
+                        except subprocess.TimeoutExpired:
+                            ok, err = False, "git remote set-url timeout"
+                else:
+                    ok, err = False, res.stderr
+            except subprocess.TimeoutExpired:
+                ok, err = False, "git clone timeout"
     finally:
         if key_path and os.path.exists(key_path):
             try:
@@ -281,9 +297,14 @@ def reconcile_repo(rid: str):
         print(f"store: reconcile failed for {rid}: {_redact(err.strip())}")
         return
     r.pop("error", None)
-    _render_jobs(rid, wd)
-    _parse_inventory(rid, wd)
-    _install_galaxy_requirements(wd)
+    try:
+        _render_jobs(rid, wd)
+        _parse_inventory(rid, wd)
+        _install_galaxy_requirements(wd)
+    except Exception as e:
+        msg = _redact(str(e))
+        r["error"] = f"post-clone processing failed: {msg}"
+        print(f"store: post-clone processing failed for {rid}: {msg}")
 
 
 _REQ_CANDIDATES = [
