@@ -5,6 +5,7 @@ import { Icons } from "../components/icons";
 import { EmptyState } from "../components/EmptyState";
 import { relTime, dur, cronHuman } from "../lib/format";
 import { useData } from "../lib/data";
+import { useColumnWidths, measureColumn, ColResizer, type ColWidths, type ColBounds } from "../lib/columns";
 import type { Job, NavFn } from "../data/types";
 
 const FILTERS = [
@@ -15,6 +16,20 @@ const FILTERS = [
   { k: "stale", label: "Stale" },
   { k: "never", label: "No data" },
 ];
+
+// Resizable data columns. Status (20), Trend (132) and Actions (flex) are fixed;
+// Actions uses minmax(…,1fr) so it absorbs slack and stays pinned right.
+const COL_DEFAULTS: ColWidths = { job: 360, schedule: 240, target: 150, lastRun: 135 };
+const COL_BOUNDS: ColBounds = {
+  job: { min: 180, max: 760 },
+  schedule: { min: 120, max: 480 },
+  target: { min: 90, max: 420 },
+  lastRun: { min: 90, max: 360 },
+};
+const COL_STORAGE = "rudder.jobs.col-widths";
+const RESIZABLE: [string, string][] = [["job", "Job"], ["schedule", "Schedule"], ["target", "Target"], ["lastRun", "Last run"]];
+const gridTemplate = (w: ColWidths) =>
+  `20px ${w.job}px ${w.schedule}px ${w.target}px ${w.lastRun}px 132px minmax(88px, 1fr)`;
 
 function Seg({ value, onChange, options, counts }:
   { value: string; onChange: (k: string) => void; options: { k: string; label: string }[]; counts: Record<string, number> }) {
@@ -41,27 +56,27 @@ function JobRow({ j, nav, onRun }: { j: Job; nav: NavFn; onRun: (name: string) =
   return (
     <div onClick={() => nav("job", { name: j.name })}
       onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
-      style={{ display: "grid", gridTemplateColumns: "20px 2.4fr 1.6fr 1fr 0.9fr 132px 88px", gap: 16, alignItems: "center",
+      style={{ display: "grid", gridTemplateColumns: "var(--grid)", gap: 16, alignItems: "center", width: "100%", minWidth: "max-content",
         padding: "0 18px", height: "var(--row-h)", background: h ? "var(--surface-2)" : "transparent", cursor: "pointer",
         borderBottom: "1px solid var(--line-soft)", transition: "background .1s" }}>
       <StatusDot s={j.status} size={9} />
-      <div style={{ minWidth: 0 }}>
+      <div data-col="job" style={{ minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.name}</span>
           <KindTag kind={j.kind} />
         </div>
-        <div className="mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.playbook}</div>
+        <div className="mono" title={j.playbook} style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.playbook}</div>
       </div>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>{cronHuman(j.cron)}</div>
-        <div className="mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>{j.cron}</div>
+      <div data-col="schedule" style={{ minWidth: 0 }}>
+        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cronHuman(j.cron)}</div>
+        <div className="mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.cron}</div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+      <div data-col="target" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
         {j.provider === "ado" ? <Icons.azure size={13} style={{ color: "var(--text-faint)", flexShrink: 0 }} /> : <Icons.github size={13} style={{ color: "var(--text-faint)", flexShrink: 0 }} />}
-        <span className="mono" style={{ fontSize: 11.5, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.limit}</span>
+        <span className="mono" title={j.limit} style={{ fontSize: 11.5, color: "var(--text-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.limit}</span>
       </div>
-      <div>
-        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)" }}>{relTime(j.lastRun)}</div>
+      <div data-col="lastRun" style={{ minWidth: 0 }}>
+        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{relTime(j.lastRun)}</div>
         <div className="mono" style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>{dur(j.duration)}</div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -81,6 +96,14 @@ export function JobsScreen({ nav, initialFilter }: { nav: NavFn; initialFilter?:
   const [filter, setFilter] = React.useState(initialFilter || "all");
   const [q, setQ] = React.useState("");
   const [prov, setProv] = React.useState("all");
+
+  const { widths, set, clamp } = useColumnWidths(COL_STORAGE, COL_DEFAULTS, COL_BOUNDS);
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  // Live preview during a drag updates the CSS var directly (no React re-render);
+  // the committed width lands in state on pointer-up and persists.
+  const preview = (key: string, w: number) =>
+    wrapRef.current?.style.setProperty("--grid", gridTemplate({ ...widths, [key]: clamp(key, w) }));
+  const autoFit = (key: string) => { if (wrapRef.current) set(key, measureColumn(wrapRef.current, key)); };
 
   if (!loading && repos.length === 0) {
     return <EmptyState icon={Icons.jobs} title="No jobs yet"
@@ -136,16 +159,27 @@ export function JobsScreen({ nav, initialFilter }: { nav: NavFn; initialFilter?:
       </div>
 
       <Card pad={false}>
-        <div style={{ display: "grid", gridTemplateColumns: "20px 2.4fr 1.6fr 1fr 0.9fr 132px 88px", gap: 16, alignItems: "center",
-          padding: "10px 18px", borderBottom: "1px solid var(--line)", color: "var(--text-faint)", fontSize: "var(--fs-micro)",
-          fontWeight: 650, letterSpacing: ".06em", textTransform: "uppercase" }}>
-          <span></span><span>Job</span><span>Schedule</span><span>Target</span><span>Last run</span><span>Trend · success</span><span style={{ textAlign: "right" }}></span>
+        <div ref={wrapRef} style={{ overflowX: "auto", "--grid": gridTemplate(widths) } as React.CSSProperties}>
+          <div style={{ display: "grid", gridTemplateColumns: "var(--grid)", gap: 16, alignItems: "center", width: "100%", minWidth: "max-content",
+            height: 38, padding: "0 18px", borderBottom: "1px solid var(--line)", color: "var(--text-faint)", fontSize: "var(--fs-micro)",
+            fontWeight: 650, letterSpacing: ".06em", textTransform: "uppercase" }}>
+            <span></span>
+            {RESIZABLE.map(([key, label]) => (
+              <span key={key} style={{ position: "relative", alignSelf: "stretch", display: "flex", alignItems: "center" }}>
+                {label}
+                <ColResizer label={label} width={widths[key]} min={COL_BOUNDS[key].min} max={COL_BOUNDS[key].max}
+                  onPreview={(w) => preview(key, w)} onCommit={(w) => set(key, w)} onAutoFit={() => autoFit(key)} />
+              </span>
+            ))}
+            <span>Trend · success</span>
+            <span style={{ textAlign: "right" }}></span>
+          </div>
+          {rows.length ? rows.map((j) => <JobRow key={j.name} j={j} nav={nav} onRun={runJob} />)
+            : <div style={{ padding: "48px", textAlign: "center", color: "var(--text-3)" }}>
+                <Icons.search size={22} style={{ color: "var(--text-faint)", marginBottom: 10 }} />
+                <div style={{ fontSize: "var(--fs-sm)" }}>No jobs match these filters.</div>
+              </div>}
         </div>
-        {rows.length ? rows.map((j) => <JobRow key={j.name} j={j} nav={nav} onRun={runJob} />)
-          : <div style={{ padding: "48px", textAlign: "center", color: "var(--text-3)" }}>
-              <Icons.search size={22} style={{ color: "var(--text-faint)", marginBottom: 10 }} />
-              <div style={{ fontSize: "var(--fs-sm)" }}>No jobs match these filters.</div>
-            </div>}
       </Card>
     </div>
   );

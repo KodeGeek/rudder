@@ -142,6 +142,20 @@ input, textarea, select { font-family: inherit; }
 
 .mono { font-family: var(--font-mono); font-feature-settings: "ss01","zero"; }
 
+/* resizable column handle — sits in the gutter at a header cell's right edge */
+.col-resizer {
+  position: absolute; top: 0; right: -8px; width: 16px; height: 100%;
+  display: flex; justify-content: center; align-items: stretch;
+  cursor: col-resize; touch-action: none; z-index: 1;
+}
+.col-resizer-bar {
+  width: 2px; margin: 22% 0; border-radius: 2px;
+  background: transparent; transition: background .12s;
+}
+.col-resizer:hover .col-resizer-bar { background: var(--accent-line); }
+.col-resizer:focus-visible { outline: none; }
+.col-resizer:focus-visible .col-resizer-bar { background: var(--accent); margin: 8% 0; }
+
 /* shared focus ring */
 .focusable:focus-visible,
 button:focus-visible,
