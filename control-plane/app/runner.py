@@ -272,7 +272,8 @@ def run_job(name: str, manual: bool = False):
     tail = log_lines[-400:] or [{"t": "task", "text": "(no output)"}]
     store.replace_run(name, run_id, {
         "id": run_id, "at": int(time.time() * 1000), "status": status,
-        "duration": duration, "exit": exit_code, "host": target_label, "log": tail,
+        "duration": duration, "exit": exit_code, "host": target_label,
+        "streaming": False, "log": tail,
     })
     telemetry.push_metrics(name, status == "success", exit_code, duration)
     telemetry.push_logs(name, status, out)

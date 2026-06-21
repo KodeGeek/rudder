@@ -92,7 +92,7 @@ export interface Host {
   os: string;
   up: boolean;
   jobs: number;
-  lastSeen: number;
+  lastSeen: number | null;   // null until the host has been probed (matches backend)
 }
 
 export interface ActivityItem {

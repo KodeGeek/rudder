@@ -65,3 +65,24 @@ def test_run_job_records_failure_exit(runnable, monkeypatch):
                         lambda *a, **k: FakeProc(["fatal: [h]: boom\n"], 2))
     assert runner.run_job("job1", manual=True) == "failed"
     assert store.runs["job1"][0]["exit"] == 2
+
+
+def test_run_job_times_out(runnable, monkeypatch):
+    """A hung playbook must hit the timeout: kill the process group, exit 124, log it."""
+    killed = []
+    monkeypatch.setattr(runner.os, "killpg", lambda *a: killed.append(a))   # never signal the test runner
+
+    class FakeTimer:
+        def __init__(self, interval, fn): self.fn = fn
+        def start(self): self.fn()          # fire the timeout immediately
+        def cancel(self): pass
+
+    monkeypatch.setattr(runner.threading, "Timer", FakeTimer)
+    monkeypatch.setitem(store.settings, "runTimeoutSeconds", 5)
+    monkeypatch.setattr(runner.subprocess, "Popen",
+                        lambda *a, **k: FakeProc(["PLAY [all]\n"], 0))
+    assert runner.run_job("job1", manual=True) == "failed"
+    row = store.runs["job1"][0]
+    assert row["exit"] == 124
+    assert any("timed out" in e["text"].lower() for e in row["log"])
+    assert killed, "timeout handler should have signalled the process group"

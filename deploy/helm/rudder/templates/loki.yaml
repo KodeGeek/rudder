@@ -50,6 +50,11 @@ spec:
             httpGet: { path: /ready, port: 3100 }
             initialDelaySeconds: 10
             periodSeconds: 15
+          livenessProbe:                         # match raw-k8s: restart a hung Loki
+            httpGet: { path: /ready, port: 3100 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
           volumeMounts:
             - { name: data, mountPath: /loki }
           resources:

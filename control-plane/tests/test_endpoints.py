@@ -411,3 +411,26 @@ def test_job_detail_includes_run_log_and_streaming(admin_client, monkeypatch):
     run = r.json()["runs"][0]
     assert run["streaming"] is True
     assert [l["text"] for l in run["log"]] == ["PLAY [all] — starting…", "ok: [host1]"]
+
+
+def test_activity_endpoint_handles_run_without_host(admin_client, monkeypatch):
+    """Regression: a run dict missing 'host' must not 500 /activity. The producer
+    coalesces host to '' so ActivityItem (host: str) validates."""
+    monkeypatch.setitem(store.jobs, "jh", {"name": "jh", "provider": "github", "kind": "task"})
+    monkeypatch.setitem(store.runs, "jh", [{"id": "jh-1", "at": 1, "status": "failed", "exit": 1}])  # no 'host'
+    r = admin_client.get("/activity")
+    assert r.status_code == 200
+    item = [x for x in r.json() if x["runId"] == "jh-1"][0]
+    assert item["host"] == ""
+
+
+def test_channel_on_yaml_reserved_word(monkeypatch):
+    """Regression: YAML 1.1 parses an unquoted `on:` key as bool True, so the event
+    list lands under the True key. _rebuild_channels must still populate it, or
+    alerts silently never fire."""
+    monkeypatch.setattr(store, "channels", [])
+    monkeypatch.setattr(store, "manifests", {"r1": {
+        "rudderYaml": "alerts:\n  - type: webhook\n    target: http://x\n    on: [failed]\n"}})
+    store._rebuild_channels()
+    ch = [c for c in store.channels if c["target"] == "http://x"][0]
+    assert ch["on"] == ["failed"]

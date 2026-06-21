@@ -425,7 +425,7 @@ def healthz():
     return {"status": "ok", "booted": _booted["ok"]}
 
 
-@app.get("/readyz")
+@app.get("/readyz", response_model=ReadyzResponse)
 def readyz():
     ready = _booted["ok"] and scheduler.running
     return JSONResponse({"ready": ready}, status_code=200 if ready else 503)

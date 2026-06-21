@@ -712,7 +712,7 @@ def activity_view() -> list:
         for r in rl[:8]:
             items.append({
                 "job": name, "provider": j["provider"], "status": r["status"], "at": r["at"],
-                "duration": r.get("duration"), "host": r.get("host"), "exit": r.get("exit"),
+                "duration": r.get("duration"), "host": r.get("host") or "", "exit": r.get("exit"),
                 "kind": j["kind"], "runId": r["id"],
             })
     items.sort(key=lambda x: x["at"], reverse=True)
@@ -765,8 +765,12 @@ def _rebuild_channels():
                 continue
             t = a.get("type", "webhook")
             target = a.get("target") or t
+            # YAML 1.1 parses an unquoted `on:` key as the boolean True, so the
+            # event list lands under the True key — without this, alerts silently
+            # never fire. Accept both the bool key and a quoted "on" string.
+            on = a.get("on") or a.get(True) or []
             out.append({"type": t, "label": str(target), "target": str(target),
-                        "on": a.get("on") or [], "enabled": True})
+                        "on": on, "enabled": True})
     global channels
     channels = out
 
