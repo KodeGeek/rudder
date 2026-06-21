@@ -81,6 +81,11 @@ class SparkPoint(BaseModel):
     ok: bool
 
 
+class LogLine(BaseModel):
+    t: str
+    text: str
+
+
 class Run(BaseModel):
     id: str
     at: int
@@ -88,6 +93,8 @@ class Run(BaseModel):
     duration: Optional[int] = None
     exit: Optional[int] = None
     host: str = ""
+    streaming: Optional[bool] = None
+    log: list[LogLine] = []           # run output — the portal's LogViewer reads this
 
 
 class JobView(BaseModel):

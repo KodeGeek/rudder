@@ -385,3 +385,29 @@ def test_host_stats_endpoint_accepts_nested_usage(admin_client, monkeypatch):
     assert r.status_code == 200
     body = r.json()
     assert body["mem"]["pct"] == 58.0 and body["disk"]["used"] == 24679157760
+
+
+def test_job_detail_includes_run_log_and_streaming(admin_client, monkeypatch):
+    """Regression: the Run response model must carry `log` and `streaming`, or the
+    portal's LogViewer shows no output. (The fields were silently stripped by the
+    response_model.)"""
+    sample = {
+        "name": "demo", "cron": "0 2 * * *", "playbook": "p.yml", "limit": "all",
+        "kind": "task", "args": None, "desc": "", "provider": "github",
+        "repoSlug": "o/r", "branch": "main", "enabled": True, "status": "success",
+        "lastRun": 1, "duration": 5, "exit": 0, "successRate": 100, "spark": [],
+        "nextRun": None,
+        "runs": [{
+            "id": "demo-1", "at": 1, "status": "running", "duration": None,
+            "exit": None, "host": "all", "streaming": True,
+            "log": [{"t": "play", "text": "PLAY [all] — starting…"},
+                    {"t": "ok", "text": "ok: [host1]"}],
+        }],
+    }
+    monkeypatch.setitem(store.jobs, "demo", {"name": "demo"})   # pass the existence check
+    monkeypatch.setattr(store, "job_view", lambda name, next_ms=None, with_runs=False: sample)
+    r = admin_client.get("/jobs/demo")
+    assert r.status_code == 200
+    run = r.json()["runs"][0]
+    assert run["streaming"] is True
+    assert [l["text"] for l in run["log"]] == ["PLAY [all] — starting…", "ok: [host1]"]
