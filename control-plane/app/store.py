@@ -161,11 +161,14 @@ def add_repo(provider: str, url: str, branch: str, token: str = "", auth_method:
             print("store: failed to store repo token in vault:", e)
     if vault_pass:
         try:
-            vault.set_repo_vault_pass(rid, vault_pass)
-            repos[rid]["vaultPass"] = True
+            vault.set_repo_vault_pass(rid, vault_pass)   # network I/O stays outside the lock
+            with _lock:
+                if rid in repos:                          # guard against concurrent remove_repo
+                    repos[rid]["vaultPass"] = True
         except Exception as e:
             print("store: failed to store ansible-vault password in vault:", e)
-    return repos[rid]
+    with _lock:
+        return dict(repos[rid]) if rid in repos else {}
 
 
 def remove_repo(rid: str):

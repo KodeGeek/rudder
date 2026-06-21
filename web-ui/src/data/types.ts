@@ -58,10 +58,6 @@ export interface Job {
   repo?: RepoKey;
   kind: JobKind;
   desc: string;
-  state: JobState;
-  seed: number;
-  dur: number;
-  baseDur: number;
   args?: string;
   /* derived */
   provider: Provider;

@@ -26,7 +26,7 @@ jobs:
       - name: Byte-compile
         run: python -m py_compile app/*.py
       - name: Unit tests
-        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=60
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=70
 
   frontend:
     name: web-ui (typecheck + build)

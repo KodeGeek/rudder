@@ -434,3 +434,134 @@ def test_channel_on_yaml_reserved_word(monkeypatch):
     store._rebuild_channels()
     ch = [c for c in store.channels if c["target"] == "http://x"][0]
     assert ch["on"] == ["failed"]
+
+
+# ── POST /deploy-key ──
+def test_post_deploy_key_success(admin_client, monkeypatch):
+    """POST /deploy-key returns 200 with rid, publicKey, sshUrl as non-empty strings."""
+    from app import vault
+
+    # Monkeypatch vault.ensure_repo_deploy_key to return a deterministic public key
+    def mock_ensure_repo_deploy_key(rid):
+        return "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest+Public+Key rudder-deploy-key"
+
+    monkeypatch.setattr(vault, "ensure_repo_deploy_key", mock_ensure_repo_deploy_key)
+
+    body = {"provider": "git", "url": "https://github.com/test/deploy-test"}
+    r = admin_client.post("/deploy-key", json=body)
+    assert r.status_code == 200
+    resp = r.json()
+    assert "rid" in resp
+    assert resp["rid"] == "git:test/deploy-test"
+    assert "publicKey" in resp
+    assert resp["publicKey"] == "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest+Public+Key rudder-deploy-key"
+    assert "sshUrl" in resp
+    assert resp["sshUrl"]  # non-empty string
+
+
+# ── DELETE /repos/{rid} ──
+def test_delete_repo_success(admin_client, seeded_repo_and_job, monkeypatch):
+    """DELETE /repos/{rid} returns 204 and repo is gone from GET /repos."""
+    from app import vault
+
+    client, repo_id = seeded_repo_and_job
+
+    # Monkeypatch vault cleanup to avoid real network calls
+    monkeypatch.setattr(vault, "delete_repo_token", lambda rid: None)
+    monkeypatch.setattr(vault, "delete_repo_deploy_key", lambda rid: None)
+    monkeypatch.setattr(vault, "delete_repo_vault_pass", lambda rid: None)
+    monkeypatch.setattr(vault, "delete_repo_host_key", lambda rid: None)
+
+    # Verify repo exists before delete
+    r = client.get("/repos")
+    assert r.status_code == 200
+    repos = r.json()
+    assert any(repo["id"] == repo_id for repo in repos)
+
+    # Delete the repo
+    r = client.delete(f"/repos/{repo_id}")
+    assert r.status_code == 204
+
+    # Verify repo is gone
+    r = client.get("/repos")
+    assert r.status_code == 200
+    repos = r.json()
+    assert not any(repo["id"] == repo_id for repo in repos)
+
+
+def test_delete_repo_nonexistent_returns_none(admin_client, monkeypatch):
+    """DELETE /repos/{rid} for nonexistent repo returns 204 (idempotent)."""
+    from app import vault
+
+    # Monkeypatch vault cleanup to avoid real network calls
+    monkeypatch.setattr(vault, "delete_repo_token", lambda rid: None)
+    monkeypatch.setattr(vault, "delete_repo_deploy_key", lambda rid: None)
+    monkeypatch.setattr(vault, "delete_repo_vault_pass", lambda rid: None)
+    monkeypatch.setattr(vault, "delete_repo_host_key", lambda rid: None)
+
+    # Delete a nonexistent repo (should still succeed since remove_repo is idempotent)
+    r = admin_client.delete("/repos/git:nonexistent/repo")
+    assert r.status_code == 204
+
+
+# ── POST /jobs/{name}/runs/{run_id}/stop ──
+def test_post_jobs_stop_run_success(admin_client, seeded_repo_and_job, monkeypatch):
+    """POST /jobs/{name}/runs/{run_id}/stop returns 200 with stopped=True when runner.stop_run succeeds."""
+    _, _ = seeded_repo_and_job
+
+    # Mock runner.stop_run to return True
+    def mock_stop_run(run_id):
+        return True
+
+    monkeypatch.setattr(runner, "stop_run", mock_stop_run)
+
+    r = admin_client.post("/jobs/test-job/runs/test-job-1/stop")
+    assert r.status_code == 200
+    assert r.json()["stopped"] is True
+
+
+def test_post_jobs_stop_run_missing_job_returns_404(admin_client, monkeypatch):
+    """POST /jobs/{name}/runs/{run_id}/stop returns 404 for nonexistent job."""
+    def mock_stop_run(run_id):
+        return True
+
+    monkeypatch.setattr(runner, "stop_run", mock_stop_run)
+
+    r = admin_client.post("/jobs/no-such-job/runs/some-run/stop")
+    assert r.status_code == 404
+    assert "job not found" in r.json()["detail"]
+
+
+# ── POST /channels/test ──
+def test_post_channels_test_success(admin_client, monkeypatch):
+    """POST /channels/test returns 200 with sent=True when alerts.test_channel succeeds."""
+    from app import alerts
+
+    # Monkeypatch alerts.test_channel to a no-op that returns True
+    def mock_test_channel(ch):
+        return True
+
+    monkeypatch.setattr(alerts, "test_channel", mock_test_channel)
+
+    body = {"type": "webhook", "target": "http://example.com/webhook"}
+    r = admin_client.post("/channels/test", json=body)
+    assert r.status_code == 200
+    resp = r.json()
+    assert "sent" in resp
+    assert resp["sent"] is True
+
+
+def test_post_channels_test_fails_with_502_on_exception(admin_client, monkeypatch):
+    """POST /channels/test returns 502 when alerts.test_channel raises an exception."""
+    from app import alerts
+
+    # Monkeypatch alerts.test_channel to raise an exception
+    def mock_test_channel_fail(ch):
+        raise RuntimeError("webhook unreachable")
+
+    monkeypatch.setattr(alerts, "test_channel", mock_test_channel_fail)
+
+    body = {"type": "webhook", "target": "http://bad.example.com/webhook"}
+    r = admin_client.post("/channels/test", json=body)
+    assert r.status_code == 502
+    assert "test failed" in r.json()["detail"]
